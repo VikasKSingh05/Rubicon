@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----- Node services (backend, agent-service, frontend) -----
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            agent-service/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci
+
+      - name: Test backend
+        working-directory: backend
+        run: npm test
+
+      - name: Install agent-service deps
+        working-directory: agent-service
+        run: npm ci
+
+      - name: Test agent-service
+        working-directory: agent-service
+        run: npm test
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
+
+      # ----- Python service (ai-engine) -----
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install ai-engine deps
+        working-directory: ai-engine
+        run: pip install -r requirements.txt
+
+      - name: Test ai-engine
+        working-directory: ai-engine
+        run: python -m pytest
