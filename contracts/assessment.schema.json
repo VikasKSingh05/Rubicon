@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Assessment",
+  "description": "MongoDB assessment document. chain fields (hsiCid, lidarCid, txHash, chainVerified) are null in Phase 0/1 and filled in Phase 5.",
+  "type": "object",
+  "required": [
+    "_id", "user", "state", "filename", "prediction", "confidence",
+    "class_probs", "geojson_polygon", "model_version", "hsiCid",
+    "lidarCid", "txHash", "chainVerified", "timestamps", "createdAt", "updatedAt"
+  ],
+  "properties": {
+    "_id": { "type": "string", "description": "ObjectId hex" },
+    "user": { "type": "string", "description": "ObjectId of owning user" },
+    "state": {
+      "type": "string",
+      "enum": ["uploaded", "analyzing", "analyzed", "chain_pending", "chain_logged"]
+    },
+    "filename": {
+      "type": "object",
+      "properties": {
+        "hsi": { "type": "string" },
+        "lidar": { "type": "string" }
+      },
+      "required": ["hsi", "lidar"]
+    },
+    "prediction": { "type": "string" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "class_probs": {
+      "type": "object",
+      "additionalProperties": { "type": "number" }
+    },
+    "geojson_polygon": {
+      "type": "object",
+      "required": ["type", "coordinates"],
+      "properties": {
+        "type": { "const": "Polygon" },
+        "coordinates": {
+          "type": "array",
+          "description": "array of [lng, lat] rings"
+        }
+      }
+    },
+    "model_version": { "type": "string" },
+    "hsiCid": { "type": ["string", "null"] },
+    "lidarCid": { "type": ["string", "null"] },
+    "txHash": { "type": ["string", "null"] },
+    "chainVerified": { "type": "boolean" },
+    "timestamps": {
+      "type": "object",
+      "properties": {
+        "uploaded": { "type": ["string", "null"], "format": "date-time" },
+        "analyzing": { "type": ["string", "null"], "format": "date-time" },
+        "analyzed": { "type": ["string", "null"], "format": "date-time" },
+        "chainPending": { "type": ["string", "null"], "format": "date-time" },
+        "chainLogged": { "type": ["string", "null"], "format": "date-time" }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  }
+}

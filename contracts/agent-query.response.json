@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /agent/query",
+  "description": "Agent chat response. Tool-grounded: answer arrives only from tool results, never the LLM's internal knowledge.",
+  "request": {
+    "query": "Which zones are severe and unlogged?",
+    "assessmentId": "665d8f3e2f3a4b5c6d7e8f90"
+  },
+  "response": {
+    "answer": "There are 3 severe zones. Two are already verified on-chain; one (zone 665d…8f90) is not yet logged.",
+    "tool_calls": [
+      {
+        "tool": "get_recent_assessments",
+        "input": { "severity_filter": "Severe", "limit": 20 },
+        "ok": true
+      },
+      {
+        "tool": "get_chain_status",
+        "input": { "cid": "Qm123" },
+        "ok": true
+      }
+    ],
+    "createdAt": "2026-09-07T12:30:00.000Z"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /predict",
+  "description": "AI engine inference response. Swapped from stub (Phase 1) to real model (Phase 3) with zero contract change.",
+  "response": {
+    "prediction": "Severe Collapse",
+    "confidence": 0.91,
+    "class_probs": {
+      "None": 0.02,
+      "Moderate": 0.07,
+      "Severe Collapse": 0.91
+    },
+    "geojson_polygon": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [-95.4, 29.8],
+          [-95.3, 29.8],
+          [-95.3, 29.9],
+          [-95.4, 29.9]
+        ]
+      ]
+    },
+    "model_version": "stub-v0"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "endpoint": "POST /upload",
+  "description": "Backend response after accepting a scan (multipart/form-data: hsi + lidar) and running (initially simulated) analysis.",
+  "request": {
+    "contentType": "multipart/form-data",
+    "fields": {
+      "hsi": { "type": "file", "accept": [".tiff"] },
+      "lidar": { "type": "file", "accept": [".las"] }
+    }
+  },
+  "response": {
+    "assessmentId": "665d8f3e2f3a4b5c6d7e8f90",
+    "state": "analyzed",
+    "prediction": "Severe Collapse",
+    "confidence": 0.91,
+    "class_probs": {
+      "None": 0.02,
+      "Moderate": 0.07,
+      "Severe Collapse": 0.91
+    },
+    "geojson_polygon": {
+      "type": "Polygon",
+      "coordinates": [
+        [
+          [-95.4, 29.8],
+          [-95.3, 29.8],
+          [-95.3, 29.9],
+          [-95.4, 29.9]
+        ]
+      ]
+    },
+    "model_version": "stub-v0",
+    "createdAt": "2026-09-07T12:00:00.000Z",
+    "links": {
+      "detail": "/assessments/665d8f3e2f3a4b5c6d7e8f90"
+    }
+  }
+}
