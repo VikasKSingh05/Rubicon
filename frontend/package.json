@@ -1,18 +1,33 @@
 {
   "name": "rubicon-frontend",
-  "version": "0.1.0",
-  "description": "Rubicon frontend stub — serves the dashboard/upload/detail/chat UI (built out in Phase 1).",
+  "version": "0.2.0",
+  "description": "Rubicon frontend — map-based dashboard (Phase 1 stub vertical slice).",
   "private": true,
   "type": "module",
-  "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "test": "node --test tests/*.test.js"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^6.26.0"
   },
   "devDependencies": {
-    "supertest": "^7.0.0"
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.40",
+    "tailwindcss": "^3.4.7",
+    "vite": "^5.3.5",
+    "vitest": "^2.0.5"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
   }
 }
