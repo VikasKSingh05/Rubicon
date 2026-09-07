@@ -1,23 +1,16 @@
 import { pathToFileURL } from "node:url";
-import express from "express";
+import "dotenv/config";
+import createApp from "./app.js";
+import { connectDb } from "./db.js";
+import { config } from "./config.js";
 
-const PORT = process.env.BACKEND_PORT || 4000;
-const app = express();
-
-app.use(express.json());
-
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "backend" });
-});
-
-app.get("/", (_req, res) => {
-  res.json({ service: "backend", message: "Rubicon backend stub" });
-});
+const app = createApp();
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
-  app.listen(PORT, () => {
-    console.log(`[backend] listening on port ${PORT}`);
+  await connectDb(config.mongoUri);
+  app.listen(config.port, () => {
+    console.log(`[backend] listening on port ${config.port}`);
   });
 }
 

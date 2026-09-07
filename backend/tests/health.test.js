@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 
-import app from "../src/index.js";
+import createApp from "../src/app.js";
+
+const app = createApp();
 
 test("backend exposes a health endpoint", async () => {
   const res = await request(app).get("/health");
