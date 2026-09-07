@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply font-sans bg-slate-100 text-slate-900 antialiased;
+}
+
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #cbd5e1;
+}
