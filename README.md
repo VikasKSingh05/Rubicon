@@ -7,8 +7,9 @@ Mamba–Transformer fusion model, then pins the evidence to IPFS and logs an imm
 on the **Polygon Amoy testnet** — all explorable through a map-based dashboard and a
 tool-grounded AI assistant.
 
-> ⚠️ **Project status: Phase 0** — environment, repo, and contracts-first setup. No
-> user-facing features yet; all services are stubs.
+> ⚠️ **Project status: Phase 1** — the stub vertical slice is live: register/login, upload
+> a scan, see a fake-but-realistic AI result on the map, and open its detail view. The AI
+> inference and on-chain steps are still simulated (real ones land in Phases 3 and 5).
 
 ## Monorepo layout
 
@@ -31,10 +32,13 @@ Rubicon/
 # 1. Configure environment
 cp .env.example .env          # then fill in your keys (see docs/phase0-setup.md)
 
-# 2. Run all stub services
+# 2. Run the full stack (Mongo + services)
 docker compose up --build
 
-# 3. Health checks (each service)
+# 3. Open the app
+# Frontend: http://localhost:3000  — register an account, then upload a scan
+
+# Health checks
 curl http://localhost:8000/health   # ai-engine
 curl http://localhost:8001/health   # agent-service
 curl http://localhost:4000/health   # backend
@@ -50,9 +54,9 @@ mirrored as JSON under [`contracts/`](contracts/). Build against these exactly.
 
 ```bash
 # Node services
-(cd backend && npm test)
+(cd backend && npm test)          # auth, upload, assessments (uses in-memory Mongo)
 (cd agent-service && npm test)
-(cd frontend && npm test)
+(cd frontend && npm test && npm run build)
 
 # Python service
 (cd ai-engine && pip install -r requirements.txt && python -m pytest)

@@ -31,8 +31,12 @@ async function getToken(email = EMAIL, password = PASSWORD) {
 test.before(async () => {
   process.env.JWT_SECRET = "test-secret";
   config.jwtSecret = "test-secret";
-  mongo = await MongoMemoryServer.create();
-  await mongoose.connect(mongo.getUri());
+  if (process.env.MONGO_TEST_URI) {
+    await mongoose.connect(process.env.MONGO_TEST_URI);
+  } else {
+    mongo = await MongoMemoryServer.create();
+    await mongoose.connect(mongo.getUri());
+  }
 });
 
 test.after(async () => {

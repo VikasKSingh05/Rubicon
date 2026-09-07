@@ -1,4 +1,15 @@
 services:
+  mongodb:
+    image: mongo:7
+    container_name: rubicon-mongodb
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   ai-engine:
     build: ./ai-engine
     container_name: rubicon-ai-engine
@@ -30,10 +41,14 @@ services:
     container_name: rubicon-backend
     environment:
       - BACKEND_PORT=4000
+      - MONGO_URI=mongodb://mongodb:27017/rubicon
       - AI_ENGINE_URL=http://ai-engine:8000
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
     ports:
       - "${BACKEND_PORT:-4000}:4000"
     depends_on:
+      mongodb:
+        condition: service_healthy
       ai-engine:
         condition: service_healthy
     healthcheck:
@@ -47,7 +62,6 @@ services:
     container_name: rubicon-frontend
     environment:
       - FRONTEND_PORT=3000
-      - BACKEND_URL=http://backend:4000
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
@@ -58,3 +72,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+volumes:
+  mongo-data:
