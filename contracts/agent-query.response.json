@@ -10,7 +10,7 @@
     "tool_calls": [
       {
         "tool": "get_recent_assessments",
-        "input": { "severity_filter": "Severe", "limit": 20 },
+        "input": { "severity_filter": "severe", "limit": 20 },
         "ok": true
       },
       {

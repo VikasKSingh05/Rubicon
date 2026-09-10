@@ -7,24 +7,25 @@ Mamba–Transformer fusion model, then pins the evidence to IPFS and logs an imm
 on the **Polygon Amoy testnet** — all explorable through a map-based dashboard and a
 tool-grounded AI assistant.
 
-> ⚠️ **Project status: Phase 5** — the stub vertical slice is live (register/login, upload,
-> map, detail view, AI assistant), the real Mamba–Transformer fusion model runs behind
-> `/predict`, and the agent answers from live backend data via tools. Uploads are
-> content-addressed as real IPFS CIDv0 values (Pinata pinning when configured) and logged
-> to the PramaanLedger on Polygon Amoy when the chain layer is configured; without
-> `PINATA_JWT`/Amoy keys the proof steps run in a deterministic simulated mode.
+> ⚠️ **Project status: Phase 6** — vertical slice is live end-to-end (register/login, upload,
+> map, detail view, AI assistant). Uploaded files are forwarded to the real Mamba–Transformer
+> fusion model at `/predict`, uploads are content-addressed as IPFS CIDv0 values (Pinata
+> pinning when configured), and the PramaanLedger is logged on Polygon Amoy when the chain
+> layer is configured. Without engine/`PINATA_JWT`/Amoy keys each layer degrades to a clearly
+> marked deterministic fallback so the app always runs. The agent answers from live backend
+> data via tools (LLM-backed with a key, deterministic tool-grounded fallback otherwise).
 
 ## Monorepo layout
 
 ```
 Rubicon/
-├── ai-engine/       # FastAPI inference service (stub → Phase 2/3 real model)
-├── agent-service/   # tool-grounded chat assistant (Phase 4: LLM + fallback tools)
-├── backend/         # Express API: upload, assessments, auth (stub → Phase 1+)
-├── frontend/        # map-based dashboard (stub → Phase 1)
+├── ai-engine/       # FastAPI inference service (Mamba–Transformer fusion model)
+├── agent-service/   # tool-grounded chat assistant (LLM + deterministic fallback)
+├── backend/         # Express API: upload → real inference → proof pipeline, auth
+├── frontend/        # map-based dashboard
 ├── contracts/       # JSON API-contract artifacts + Solidity (contracts/contracts/)
-├── docs/            # api-contracts.md, phase0-setup.md
-├── .env.example     # env template (Appendix B + OPENAI)
+├── docs/            # api-contracts.md, phase0-setup.md, report.md
+├── .env.example     # env template (IPFS, blockchain, agent providers)
 ├── docker-compose.yml
 └── .github/workflows/ci.yml
 ```

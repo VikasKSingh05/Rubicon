@@ -7,6 +7,7 @@ import mongoose from "mongoose";
 import createApp from "../src/app.js";
 import { config } from "../src/config.js";
 import { contentCid } from "../src/services/ipfs.js";
+import Assessment from "../src/models/Assessment.js";
 
 const app = createApp();
 let mongo;
@@ -17,6 +18,8 @@ config.pinataJwt = "";
 config.amoyRpcUrl = "";
 config.deployerPrivateKey = "";
 config.contractAddress = "";
+// Force a fast, guaranteed-unreachable engine so uploads always take the stub path.
+config.aiEngineUrl = "http://127.0.0.1:65530";
 
 const EMAIL = "demo@rubicon.dev";
 const PASSWORD = "secret123";
@@ -26,7 +29,12 @@ async function registerUser(email = EMAIL, password = PASSWORD) {
   return res;
 }
 
-// Users are registered once per email; later requests log in instead. Returns a token.
+// Unwraps the JWT subject (user id) so pagination tests can create docs for a user.
+function jwtSub(token) {
+  const payload = token.split(".")[1];
+  return JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).sub;
+}
+
 async function getToken(email = EMAIL, password = PASSWORD) {
   const registered = await registerUser(email, password);
   if (registered.status === 409) {
@@ -56,6 +64,7 @@ test("health endpoint works", async () => {
   const res = await request(app).get("/health");
   assert.equal(res.status, 200);
   assert.equal(res.body.status, "ok");
+  assert.equal(res.body.mongo, "connected");
 });
 
 test("register creates a user and returns a JWT", async () => {
@@ -187,6 +196,71 @@ test("upload content-addresses files as real CIDv0 and reports simulated chain s
   assert.equal(detail.body.chainVerified, false);
   assert.ok(detail.body.txHash.startsWith("0x"));
   assert.equal(detail.body.state, "analyzed");
+});
+
+test("register rejects a malformed email", async () => {
+  const res = await request(app)
+    .post("/auth/register")
+    .send({ email: "not-an-email", password: "secret123" });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, "email must be a valid email address");
+});
+
+test("unknown routes return a JSON 404", async () => {
+  const res = await request(app).get("/no/such/route");
+  assert.equal(res.status, 404);
+  assert.deepEqual(res.body, { error: "not found" });
+});
+
+test("async handler surfaces internal errors as JSON 500s (no hung request)", async () => {
+  const token = await getToken();
+  // "zzz" is not a valid ObjectId → mongoose CastError inside the handler.
+  const res = await request(app).get("/assessments/zzz").set(authHeader(token));
+  assert.equal(res.status, 500);
+  assert.deepEqual(res.body, { error: "internal server error" });
+});
+
+test("assessments list paginates with limit/offset and reports total", async () => {
+  const token = await getToken("page@rubicon.dev", "secret789");
+  const userId = jwtSub(token);
+  for (let i = 0; i < 3; i += 1) {
+    await Assessment.create({
+      user: userId,
+      state: "analyzed",
+      prediction: "Moderate",
+      confidence: 0.75,
+      model_version: "stub-v0",
+      geojson_polygon: {
+        type: "Polygon",
+        coordinates: [[[-95.4, 29.8], [-95.2, 29.8], [-95.2, 30.0], [-95.4, 29.8]]],
+      },
+      timestamps: { uploaded: new Date(), analyzing: new Date(), analyzed: new Date() },
+    });
+  }
+
+  const page = await request(app).get("/assessments?limit=1&offset=1").set(authHeader(token));
+  assert.equal(page.status, 200);
+  assert.equal(page.body.total, 3);
+  assert.equal(page.body.limit, 1);
+  assert.equal(page.body.offset, 1);
+  assert.equal(page.body.assessments.length, 1);
+  assert.ok("txHash" in page.body.assessments[0]);
+  assert.ok("chainVerified" in page.body.assessments[0]);
+
+  const second = await request(app).get("/assessments?offset=2").set(authHeader(token));
+  assert.equal(second.body.limit, 50, "default limit applies");
+  assert.equal(second.body.assessments.length, 1);
+});
+
+test("upload accepts .laz LiDAR alongside .tiff HSI", async () => {
+  const token = await getToken();
+  const res = await request(app)
+    .post("/upload")
+    .set(authHeader(token))
+    .attach("hsi", Buffer.from("fake-hsi"), "scans.tiff")
+    .attach("lidar", Buffer.from("fake-lidar"), "scans.laz");
+  assert.equal(res.status, 201);
+  assert.equal(res.body.model_version, "stub-v0");
 });
 
 test("assessment detail is scoped to the owning user", async () => {

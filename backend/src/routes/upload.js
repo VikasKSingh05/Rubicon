@@ -11,7 +11,7 @@ import { config } from "../config.js";
 
 const router = Router();
 
-const ALLOWED_EXTENSIONS = new Set([".tiff", ".tif", ".las"]);
+const ALLOWED_EXTENSIONS = new Set([".tiff", ".tif", ".las", ".laz"]);
 const MAX_BYTES = config.maxUploadMb * 1024 * 1024;
 
 function multerErrorToResponse(err, res) {
@@ -19,7 +19,7 @@ function multerErrorToResponse(err, res) {
     return res.status(413).json({ error: `file too large (max ${config.maxUploadMb}MB)` });
   }
   if (err?.message === "unsupported file type") {
-    return res.status(400).json({ error: "only .tiff and .las files are supported" });
+    return res.status(400).json({ error: "only .tiff/.las/.laz files are supported" });
   }
   return res.status(400).json({ error: err?.message || "upload failed" });
 }
@@ -78,8 +78,8 @@ router.post("/", requireAuth, (req, res) => {
       });
 
       transition(assessment, "analyzing");
+      const result = await runInference({ hsi, lidar });
       transition(assessment, "analyzed");
-      const result = await runInference();
 
       assessment.prediction = result.prediction;
       assessment.confidence = result.confidence;

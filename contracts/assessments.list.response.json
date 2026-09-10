@@ -1,0 +1,18 @@
+{
+  "assessments": [
+    {
+      "id": "665d8f3e2f3a4b5c6d7e8f90",
+      "prediction": "Severe Collapse",
+      "confidence": 0.91,
+      "severity": "severe",
+      "state": "analyzed",
+      "center": { "lng": -95.36, "lat": 29.76 },
+      "txHash": null,
+      "chainVerified": false,
+      "createdAt": "2026-09-07T12:00:00.000Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}

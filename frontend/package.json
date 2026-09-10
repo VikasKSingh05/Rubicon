@@ -1,7 +1,7 @@
 {
   "name": "rubicon-frontend",
   "version": "0.2.0",
-  "description": "Rubicon frontend — map-based dashboard (Phase 1 stub vertical slice).",
+  "description": "Rubicon frontend — map-based dashboard with live chain proof status",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,6 +1,6 @@
 {
   "endpoint": "POST /predict",
-  "description": "AI engine inference response. Swapped from stub (Phase 1) to real model (Phase 3) with zero contract change.",
+  "description": "AI engine inference response. Swapped from stub (Phase 1) to real model (Phase 3) with zero contract change. When the engine is unreachable the backend degrades to the stub (model_version stub-v0).",
   "response": {
     "prediction": "Severe Collapse",
     "confidence": 0.91,
@@ -20,6 +20,6 @@
         ]
       ]
     },
-    "model_version": "stub-v0"
+    "model_version": "mamba_transformer-v1"
   }
 }
