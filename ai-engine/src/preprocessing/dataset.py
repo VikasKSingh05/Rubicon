@@ -175,6 +175,7 @@ def save_dataset(cfg: dict, result: dict) -> Path:
         npz_path,
         **{k: result[k] for k in keys if k in result},
         pca_n_components=int(result["pca"].n_components_),
+        dem_scale=np.asarray(result["dem_scale"], dtype=np.float32),
     )
     with open(out / cfg["output"]["pca"], "wb") as fh:
         pickle.dump(result["pca"], fh)

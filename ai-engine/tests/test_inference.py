@@ -8,7 +8,10 @@ client = TestClient(app)
 def test_health():
     res = client.get("/health")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok", "service": "ai-engine"}
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "ai-engine"
+    assert isinstance(body["model_loaded"], bool)
 
 
 def test_predict_matches_contract():

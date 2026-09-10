@@ -15,8 +15,11 @@ services:
     container_name: rubicon-ai-engine
     environment:
       - PORT=8000
+      - RUBICON_MODEL_DIR=/app/data/models
     ports:
       - "${AI_ENGINE_PORT:-8000}:8000"
+    volumes:
+      - ./ai-engine/data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s

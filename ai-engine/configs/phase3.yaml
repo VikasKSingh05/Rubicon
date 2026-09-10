@@ -1,0 +1,47 @@
+# Phase 3 — model training configuration.
+# Run: python -m src.training.train --config configs/phase3.yaml
+#
+# kind: mamba_transformer (hardware-agnostic; the PyTorch re-implementation of
+#       the selective SSM runs on CPU) or baseline_cnn (fallback / baseline for
+#       the report). Swapping kinds requires re-running train on the same npz.
+
+model:
+  kind: mamba_transformer      # mamba_transformer | baseline_cnn
+  hsi:
+    stem_channels: 16          # conv stem embeds k PCA channels -> token grid
+    token_grid: 8              # 32/32 patches -> 8x8 = 64 tokens
+    d_model: 32
+    d_state: 16                # selective SSM state width
+    d_conv: 4
+    expand: 2
+    n_blocks: 2                # (MambaBlock + TransformerBlock) repetitions
+    n_heads: 4
+    ff_scale: 2
+    dropout: 0.1
+  dem:
+    channels: [8, 16]          # LiDAR branch
+    dropout: 0.1
+  head:
+    hidden: 64
+
+data:
+  npz: data/processed/houston2013_p32.npz   # Phase 2 build_dataset output
+  pca: data/processed/pca_p32.pkl           # fitted PCA, copied beside the model
+
+pipeline:
+  patch_size: 32                            # must match Phase 2 tiling; reused at inference
+  overlap: 0.0
+  min_labeled: 0.0                          # inference keeps every patch
+
+train:
+  batch_size: 32
+  epochs: 25
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  seed: 42
+  class_weights: true                       # inverse-frequency per severity
+
+output:
+  dir: data/models                          # gitignored; mounted into ai-engine
+  checkpoint: model.pt
+  metrics: metrics.json
