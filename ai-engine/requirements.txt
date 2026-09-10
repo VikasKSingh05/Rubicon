@@ -2,3 +2,15 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pytest==8.3.2
 httpx==0.27.2
+
+# ---- Phase 2 preprocessing ----
+numpy>=1.26,<3
+scikit-learn>=1.5
+rasterio>=1.4
+laspy>=2.5
+pyyaml>=6.0
+pandas>=2.2
+matplotlib>=3.8
+seaborn>=0.13
+requests>=2.31
+jupyterlab>=4.1
