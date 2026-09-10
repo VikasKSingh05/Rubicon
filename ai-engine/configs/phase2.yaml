@@ -1,0 +1,29 @@
+# Phase 2 — Houston 2013 preprocessing configuration.
+# Run: python -m src.preprocessing.dataset --config configs/phase2.yaml
+#
+# Dataset source: IEEE GRSS Data Fusion Contest 2013 (Houston, TX), UTM zone 15N.
+# See scripts/download_houston2013.py for acquisition notes.
+
+data:
+  root: data/houston2013
+  hsi: Houston_2013_HSI.tif          # 349 x 1905 x 144 bands (CASI, 2.5 m GSD)
+  lidar: Houston_2013_DSM.tif        # pre-rasterized height grid; a .las file here is handled automatically
+  lidar_resolution: 2.5              # meters per cell used when rasterizing a raw .las
+  labels: Houston_2013_GT.tif        # 15 land-cover classes, 0 = background
+
+pipeline:
+  patch_size: 32
+  overlap: 0.0                       # sliding-window overlap (0.0 = non-overlapping, 0.5 = 50%)
+  min_labeled: 0.5                   # discard patches where fewer than this fraction are labeled
+  pca_variance: 0.99                 # HSI spectral dimensionality reduced to retain this variance
+
+split:
+  train: 0.70
+  val: 0.15
+  test: 0.15
+  random_state: 42                   # stratification on the severity-proxy label
+
+output:
+  root: data/processed
+  npz: houston2013_p32.npz           # aligned, PCA-reduced HSI + DEM tensors + labels + split
+  pca: pca_p32.pkl                   # fitted sklearn PCA (reused at inference time)
