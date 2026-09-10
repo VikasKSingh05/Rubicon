@@ -72,7 +72,7 @@ export default function AssessmentPage() {
             <DataPanel assessment={assessment} />
           </div>
           <div className="h-72 shrink-0 border-t border-slate-200 p-3">
-            <AgentChatSlot />
+            <AgentChatSlot assessmentId={assessment.id} />
           </div>
         </aside>
       </div>

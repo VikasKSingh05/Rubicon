@@ -7,16 +7,18 @@ Mamba–Transformer fusion model, then pins the evidence to IPFS and logs an imm
 on the **Polygon Amoy testnet** — all explorable through a map-based dashboard and a
 tool-grounded AI assistant.
 
-> ⚠️ **Project status: Phase 1** — the stub vertical slice is live: register/login, upload
-> a scan, see a fake-but-realistic AI result on the map, and open its detail view. The AI
-> inference and on-chain steps are still simulated (real ones land in Phases 3 and 5).
+> ⚠️ **Project status: Phase 4** — the stub vertical slice is live (register/login, upload,
+> map, detail view, AI assistant) and the real Mamba–Transformer fusion model runs behind
+> `/predict`. The agent answers questions from live backend data via tools (LLM-backed when a
+> key is set, deterministic tool-grounded fallback otherwise). The on-chain step is still
+> simulated (real IPFS + Amoy lands in Phase 5).
 
 ## Monorepo layout
 
 ```
 Rubicon/
 ├── ai-engine/       # FastAPI inference service (stub → Phase 2/3 real model)
-├── agent-service/   # tool-grounded chat assistant (stub → Phase 4)
+├── agent-service/   # tool-grounded chat assistant (Phase 4: LLM + fallback tools)
 ├── backend/         # Express API: upload, assessments, auth (stub → Phase 1+)
 ├── frontend/        # map-based dashboard (stub → Phase 1)
 ├── contracts/       # JSON API-contract artifacts + Solidity (contracts/contracts/)
@@ -43,6 +45,12 @@ curl http://localhost:8000/health   # ai-engine
 curl http://localhost:8001/health   # agent-service
 curl http://localhost:4000/health   # backend
 curl http://localhost:3000/health   # frontend
+
+# Ask the tool-grounded agent (no LLM key needed — falls back to
+# a deterministic agent that answers strictly from the backend API)
+curl -X POST http://localhost:8001/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"how many assessments do we have?"}'
 ```
 
 ## Contracts
