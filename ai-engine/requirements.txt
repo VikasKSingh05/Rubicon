@@ -14,3 +14,7 @@ matplotlib>=3.8
 seaborn>=0.13
 requests>=2.31
 jupyterlab>=4.1
+
+# ---- Phase 3 model ----
+torch>=2.6
+python-multipart>=0.0.9

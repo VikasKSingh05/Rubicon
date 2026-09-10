@@ -28,7 +28,35 @@ Pipeline (`src/preprocessing/`):
 Datasets are gitignored (`data/`). Damage classes are a land-cover proxy —
 see `src/preprocessing/__init__.py`.
 
+## Phase 3 — Mamba-Transformer fusion model
+
+```
+python -m src.training.train --config configs/phase3.yaml   # reads the Phase 2 npz
+python -m pytest
+```
+
+| module | role |
+|---|---|
+| `src/model/mamba.py` | pure-PyTorch selective SSM (CPU-portable Mamba layer) |
+| `src/model/fusion.py` | HSI branch (conv stem -> Mamba+Transformer tokens) + LiDAR CNN branch, late fusion head |
+| `src/model/baseline.py` | fallback CNN baseline (report comparison / constrained environments) |
+| `src/model/factory.py` | `kind: mamba_transformer \| baseline_cnn` from config |
+| `src/training/train.py` | CLI: train on the npz, write `data/models/{model.pt,metrics.json,pca.pkl}` |
+| `src/model/serving.py` | uploaded HSI/LiDAR files -> aligned patches -> contract response |
+
+`data/models/` is gitignored and mounted into the ai-engine container
+(`docker-compose.yml`), so a trained artifact is picked up at startup:
+`/health` reports `model_loaded`. Without files or an artifact, `/predict`
+returns the original stub body so earlier phases keep working.
+
+The Mamba-Transformer selection is a per-scene aggregation: per-patch
+severity probabilities are averaged into `class_probs`, `prediction` is the
+argmax, `confidence` the mean probability of that class, and `geojson_polygon`
+is the envelope of affected (non-"None") patches georeferenced to lon/lat.
+
 ## Inference
 
-`src/inference.py` serves the `/predict` stub. Phase 3 replaces `PREDICT_STUB`
-with the real fusion model; the contract shape does not change.
+`src/inference.py` serves `/predict`. With a trained artifact at
+`RUBICON_MODEL_DIR` (default `./data/models`), it accepts multipart `hsi`
+(.tif/.tiff) and `lidar` (.tif/.las) files and runs the real fusion model;
+otherwise it falls back to the Phase 0 stub. The contract shape never changes.
