@@ -32,6 +32,7 @@ function listItem(doc) {
     severity: doc.severity,
     state: doc.state,
     center: bboxCenter(doc.geojson_polygon),
+    geojson_polygon: doc.geojson_polygon,
     txHash: doc.txHash,
     chainVerified: doc.chainVerified,
     createdAt: doc.createdAt.toISOString(),

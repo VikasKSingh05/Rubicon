@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { severityOf } from "../lib/severity.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 function formatTime(iso) {
   try {
@@ -12,6 +13,7 @@ function formatTime(iso) {
 
 export default function TopBar({ onUpload }) {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   return (
     <header className="flex h-14 items-center justify-between border-b border-primary/20 bg-primary px-4 text-white">
       <button
@@ -25,19 +27,37 @@ export default function TopBar({ onUpload }) {
         </span>
       </button>
       <div className="flex items-center gap-3">
+        <span className="hidden max-w-48 truncate text-xs text-white/80 sm:inline">
+          {user?.email}
+        </span>
         <button
           onClick={onUpload}
           className="rounded-md bg-verify px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-verify/90"
         >
           + Upload New Scan
         </button>
-        <span className="text-xs text-white/80">{/* user email placeholder */}</span>
+        <button
+          onClick={() => {
+            logout();
+            navigate("/login");
+          }}
+          className="rounded-md px-2 py-1 text-xs text-white/80 transition-colors hover:bg-white/10"
+        >
+          Logout
+        </button>
       </div>
     </header>
   );
 }
 
-export function AssessmentList({ assessments, activeId, onSelect }) {
+export function AssessmentList({ assessments, activeId, onSelect, loading = false }) {
+  if (loading) {
+    return (
+      <div className="p-4 text-sm text-slate-400" role="status">
+        Loading assessments…
+      </div>
+    );
+  }
   if (assessments.length === 0) {
     return (
       <p className="p-4 text-sm text-slate-500">
@@ -78,13 +98,37 @@ export function AssessmentList({ assessments, activeId, onSelect }) {
   );
 }
 
-export function Sidebar({ assessments, activeId, onSelect }) {
+export function Sidebar({
+  assessments,
+  activeId,
+  onSelect,
+  loading = false,
+  canLoadMore = false,
+  loadingMore = false,
+  onLoadMore,
+}) {
   return (
     <aside className="w-72 shrink-0 overflow-y-auto border-r border-slate-300 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
         <h2 className="text-sm font-semibold text-slate-700">Past Assessments</h2>
       </div>
-      <AssessmentList assessments={assessments} activeId={activeId} onSelect={onSelect} />
+      <AssessmentList
+        assessments={assessments}
+        activeId={activeId}
+        onSelect={onSelect}
+        loading={loading}
+      />
+      {canLoadMore && !loading && (
+        <div className="border-t border-slate-200 p-3">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-60"
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

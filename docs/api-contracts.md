@@ -136,6 +136,7 @@ and `?offset=` (default 0).
       "severity": "severe",
       "state": "analyzed",
       "center": { "lng": -95.36, "lat": 29.76 },
+      "geojson_polygon": { "type": "Polygon", "coordinates": [[[-95.36, 29.76], [-95.36, 29.77], [-95.35, 29.77], [-95.35, 29.76], [-95.36, 29.76]]] },
       "txHash": null,
       "chainVerified": false,
       "createdAt": "2026-09-07T12:00:00.000Z"

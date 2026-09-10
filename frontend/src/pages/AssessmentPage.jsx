@@ -10,6 +10,7 @@ export default function AssessmentPage() {
   const { id } = useParams();
   const [assessment, setAssessment] = useState(null);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,7 +19,10 @@ export default function AssessmentPage() {
         if (!cancelled) setAssessment(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message);
+        if (!cancelled) {
+          setError(err.message);
+          setStatus(err.status || 0);
+        }
       });
     return () => {
       cancelled = true;
@@ -26,12 +30,20 @@ export default function AssessmentPage() {
   }, [id]);
 
   if (error) {
+    const notFound = status === 404;
     return (
       <div className="flex h-full flex-col">
         <TopBar onUpload={() => {}} />
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
-            <p className="text-severity-severe">{error}</p>
+            <p
+              className={`${notFound ? "text-4xl font-bold text-slate-400" : "text-severity-severe"}`}
+            >
+              {notFound ? "404" : ""}
+            </p>
+            <p className="mt-1 text-slate-600">
+              {notFound ? "Assessment not found." : error}
+            </p>
             <Link to="/" className="mt-2 inline-block text-sm underline">
               Back to dashboard
             </Link>
