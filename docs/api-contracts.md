@@ -172,7 +172,7 @@ data, it says so (e.g. `"I don't have data for that zone."`) rather than guessin
 
 - `get_recent_assessments(severity_filter, limit)` → queries backend Mongo-backed API.
 - `get_assessment(id)` → full record for one assessment (confidence, probs, chain fields).
-- `get_chain_status(cid)` → calls backend `/chain/verify/:cid` (stubbed in Phase 4, real in Phase 5).
+- `get_chain_status(cid)` → calls backend `/chain/verify/:cid` (on-chain event lookup when the Amoy layer is configured; DB-backed otherwise).
 - `summarize_zone(geojson)` → stats summary (area, class, confidence).
 
 The agent may run the tools through an LLM tool-calling loop (Anthropic or OpenAI, see
@@ -256,8 +256,13 @@ uploaded ──► analyzing ──► analyzed ──► chain_pending ──�
 | `chain_pending` | Phase 5         | IPFS pinning / on-chain tx submitted.            |
 | `chain_logged`  | Phase 5         | On-chain log confirmed (real txHash).            |
 
-> Phase 0/1 stub instantly transitions `uploaded → analyzed` with a fake `txHash` so the
-> schema field exists **now** and Phase 5 needs **no migration**.
+> Phase 5 runs the real proof pipeline for every upload: uploads are content-addressed
+> as IPFS CIDv0 values (pinned via Pinata when `PINATA_JWT` is set) and, when the Amoy
+> layer is configured (`AMOY_RPC_URL` + `DEPLOYER_PRIVATE_KEY` + `CONTRACT_ADDRESS`),
+> the assessment is logged on-chain (`chain_pending → chain_logged`, `chainVerified: true`).
+> Without chain config the upload falls back to a **deterministic simulated record**
+> (fake `txHash`, `chainVerified: false`, state stays `analyzed`) so the app runs fully
+> offline. Real CIDv0 hashes are produced locally regardless of Pinata availability.
 
 ---
 

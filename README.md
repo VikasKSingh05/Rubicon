@@ -7,11 +7,12 @@ Mamba–Transformer fusion model, then pins the evidence to IPFS and logs an imm
 on the **Polygon Amoy testnet** — all explorable through a map-based dashboard and a
 tool-grounded AI assistant.
 
-> ⚠️ **Project status: Phase 4** — the stub vertical slice is live (register/login, upload,
-> map, detail view, AI assistant) and the real Mamba–Transformer fusion model runs behind
-> `/predict`. The agent answers questions from live backend data via tools (LLM-backed when a
-> key is set, deterministic tool-grounded fallback otherwise). The on-chain step is still
-> simulated (real IPFS + Amoy lands in Phase 5).
+> ⚠️ **Project status: Phase 5** — the stub vertical slice is live (register/login, upload,
+> map, detail view, AI assistant), the real Mamba–Transformer fusion model runs behind
+> `/predict`, and the agent answers from live backend data via tools. Uploads are
+> content-addressed as real IPFS CIDv0 values (Pinata pinning when configured) and logged
+> to the PramaanLedger on Polygon Amoy when the chain layer is configured; without
+> `PINATA_JWT`/Amoy keys the proof steps run in a deterministic simulated mode.
 
 ## Monorepo layout
 

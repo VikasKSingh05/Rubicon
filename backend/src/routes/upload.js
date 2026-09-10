@@ -1,11 +1,12 @@
 import { Router } from "express";
 import path from "node:path";
-import crypto from "node:crypto";
 import multer from "multer";
 import { requireAuth } from "../middleware/auth.js";
 import Assessment from "../models/Assessment.js";
 import { runInference } from "../services/aiService.js";
 import { transition } from "../services/assessmentService.js";
+import { pinBuffer } from "../services/ipfs.js";
+import { logAssessment } from "../services/chainService.js";
 import { config } from "../config.js";
 
 const router = Router();
@@ -36,12 +37,25 @@ const upload = multer({
   { name: "lidar", maxCount: 1 },
 ]);
 
-function fakeChainIds(assessment, filenames) {
-  const hash = (input) => crypto.createHash("sha256").update(input).digest("hex").slice(0, 40);
-  assessment.hsiCid = `Qm${hash(`${filenames.hsi}`)}`;
-  assessment.lidarCid = `Qm${hash(`${filenames.lidar}`)}`;
-  assessment.txHash = `0x${hash(`${filenames.hsi}-${filenames.lidar}`)}`;
-  assessment.chainVerified = false;
+// Phase 5 proof pipeline: content-address the uploads as real IPFS CIDv0 values
+// (pinning when Pinata is configured), then log the assessment on-chain (real
+// Amoy tx when the chain layer is configured, deterministic simulated tx
+// otherwise — the simulated path leaves state at "analyzed").
+async function attachProof(assessment, files, prediction) {
+  const [hp, lp] = await Promise.all([
+    pinBuffer(files.hsi.buffer, files.hsi.originalname),
+    pinBuffer(files.lidar.buffer, files.lidar.originalname),
+  ]);
+  assessment.hsiCid = hp.cid;
+  assessment.lidarCid = lp.cid;
+
+  const logged = await logAssessment({ hsiCid: hp.cid, lidarCid: lp.cid, prediction });
+  assessment.txHash = logged.txHash;
+  assessment.chainVerified = logged.chainVerified;
+  if (!logged.simulated) {
+    transition(assessment, "chain_pending");
+    transition(assessment, "chain_logged");
+  }
   return assessment;
 }
 
@@ -73,7 +87,7 @@ router.post("/", requireAuth, (req, res) => {
       assessment.geojson_polygon = result.geojson_polygon;
       assessment.model_version = result.model_version;
 
-      fakeChainIds(assessment, assessment.filename);
+      await attachProof(assessment, { hsi, lidar }, result.prediction);
 
       await assessment.save();
 

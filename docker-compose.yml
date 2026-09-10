@@ -55,6 +55,11 @@ services:
       - MONGO_URI=mongodb://mongodb:27017/rubicon
       - AI_ENGINE_URL=http://ai-engine:8000
       - JWT_SECRET=${JWT_SECRET:-dev-secret-change-me}
+      - PINATA_JWT=${PINATA_JWT:-}
+      - AMOY_RPC_URL=${AMOY_RPC_URL:-}
+      - DEPLOYER_PRIVATE_KEY=${DEPLOYER_PRIVATE_KEY:-}
+      - CONTRACT_ADDRESS=${CONTRACT_ADDRESS:-}
+      - CHAIN_ID=${CHAIN_ID:-80002}
     ports:
       - "${BACKEND_PORT:-4000}:4000"
     depends_on:

@@ -6,9 +6,17 @@ import mongoose from "mongoose";
 
 import createApp from "../src/app.js";
 import { config } from "../src/config.js";
+import { contentCid } from "../src/services/ipfs.js";
 
 const app = createApp();
 let mongo;
+
+// Force the Phase 5 proof layers into offline/simulated mode regardless of the
+// host environment, so tests never touch Pinata or Amoy.
+config.pinataJwt = "";
+config.amoyRpcUrl = "";
+config.deployerPrivateKey = "";
+config.contractAddress = "";
 
 const EMAIL = "demo@rubicon.dev";
 const PASSWORD = "secret123";
@@ -164,6 +172,20 @@ test("assessment detail returns full document and chain fields exist", async () 
   assert.ok("lidarCid" in detail.body);
   assert.ok("txHash" in detail.body);
   assert.ok("chainVerified" in detail.body);
+  assert.equal(detail.body.state, "analyzed");
+});
+
+test("upload content-addresses files as real CIDv0 and reports simulated chain status", async () => {
+  const token = await getToken();
+  const res = await uploadFiles(token, "proof.tiff", "proof.las");
+  assert.equal(res.status, 201);
+
+  const detail = await request(app).get(res.body.links.detail).set(authHeader(token));
+  assert.equal(detail.body.hsiCid, contentCid(Buffer.from("fake-hsi")));
+  assert.equal(detail.body.lidarCid, contentCid(Buffer.from("fake-lidar")));
+  // Offline proof: a deterministic fake tx, chain not yet verified.
+  assert.equal(detail.body.chainVerified, false);
+  assert.ok(detail.body.txHash.startsWith("0x"));
   assert.equal(detail.body.state, "analyzed");
 });
 

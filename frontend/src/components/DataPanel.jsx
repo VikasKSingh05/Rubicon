@@ -53,7 +53,10 @@ export default function DataPanel({ assessment }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <SeverityBadge prediction={a.prediction} />
-        <ChainBadge disabled />
+        <ChainBadge
+          chainVerified={a.chainVerified}
+          href={a.txHash ? `https://amoy.polygonscan.com/tx/${a.txHash}` : null}
+        />
       </div>
 
       <section className="rounded-lg border border-slate-200 p-3">
@@ -79,6 +82,9 @@ export default function DataPanel({ assessment }) {
         <ChainInfo a={a} />
         <Row label="Uploaded" value={a.timestamps?.uploaded ? new Date(a.timestamps.uploaded).toLocaleString() : null} />
         <Row label="Analyzed" value={a.timestamps?.analyzed ? new Date(a.timestamps.analyzed).toLocaleString() : null} />
+        {a.timestamps?.chainLogged && (
+          <Row label="Chain log" value={new Date(a.timestamps.chainLogged).toLocaleString()} />
+        )}
       </section>
     </div>
   );
