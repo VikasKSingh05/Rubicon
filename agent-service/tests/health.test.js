@@ -21,6 +21,20 @@ test("agent-service exposes a tools manifest", async () => {
   }
 });
 
+test("CORS preflight is answered for the cross-origin chat panel", async () => {
+  const res = await request(app)
+    .options("/agent/query")
+    .set("origin", "http://localhost:3000")
+    .set("access-control-request-method", "POST")
+    .set("access-control-request-headers", "content-type");
+  assert.equal(res.status, 204);
+  assert.equal(res.headers["access-control-allow-origin"], "*");
+  assert.ok(
+    (res.headers["access-control-allow-methods"] || "").includes("POST"),
+    "expected POST in allow-methods",
+  );
+});
+
 test("POST /agent/query requires a query", async () => {
   const res = await request(app).post("/agent/query").send({});
   assert.equal(res.status, 400);
