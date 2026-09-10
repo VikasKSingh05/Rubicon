@@ -174,3 +174,34 @@ test("assessment detail is scoped to the owning user", async () => {
   const res = await request(app).get(up.body.links.detail).set(authHeader(otherToken));
   assert.equal(res.status, 404);
 });
+
+test("chain verify stub reports the assessment for a known CID", async () => {
+  const token = await getToken();
+  const up = await uploadFiles(token);
+  const detail = await request(app).get(up.body.links.detail).set(authHeader(token));
+  const res = await request(app).get(`/chain/verify/${detail.body.hsiCid}`).set(authHeader(token));
+  assert.equal(res.status, 200);
+  assert.equal(res.body.cid, detail.body.hsiCid);
+  assert.equal(res.body.verified, false);
+  // CIDs are content-derived, so any upload of the same file matches; the
+  // stub must always report a concrete assessment once at least one exists.
+  assert.ok(res.body.assessmentId);
+  assert.equal(res.body.state, "analyzed");
+  assert.ok(res.body.txHash);
+});
+
+test("chain verify requires auth and handles unknown CIDs", async () => {
+  const anon = await request(app).get("/chain/verify/QmUnknown123");
+  assert.equal(anon.status, 401);
+
+  const token = await getToken();
+  const res = await request(app).get("/chain/verify/QmUnknown123").set(authHeader(token));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, {
+    cid: "QmUnknown123",
+    verified: false,
+    txHash: null,
+    assessmentId: null,
+    state: null,
+  });
+});

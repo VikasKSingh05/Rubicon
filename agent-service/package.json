@@ -1,7 +1,7 @@
 {
   "name": "rubicon-agent-service",
   "version": "0.1.0",
-  "description": "Rubicon agent-service stub — POST /agent/query (tool-grounded chat).",
+  "description": "Rubicon agent-service — POST /agent/query, tool-grounded LLM agent (Anthropic/OpenAI) with deterministic fallback.",
   "private": true,
   "type": "module",
   "main": "src/index.js",

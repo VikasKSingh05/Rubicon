@@ -3,6 +3,7 @@ import cors from "cors";
 import authRoutes from "./routes/auth.js";
 import uploadRoutes from "./routes/upload.js";
 import assessmentRoutes from "./routes/assessments.js";
+import chainRoutes from "./routes/chain.js";
 
 export default function createApp() {
   const app = express();
@@ -20,6 +21,7 @@ export default function createApp() {
   app.use("/auth", authRoutes);
   app.use("/upload", uploadRoutes);
   app.use("/assessments", assessmentRoutes);
+  app.use("/chain", chainRoutes);
 
   return app;
 }

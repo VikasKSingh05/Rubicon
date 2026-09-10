@@ -124,7 +124,8 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, `accept .tiff/.las`
 ```json
 {
   "query": "Which zones are severe and unlogged?",
-  "assessmentId": "665d8f3e2f3a4b5c6d7e8f90"
+  "assessmentId": "665d8f3e2f3a4b5c6d7e8f90",
+  "token": "<optional> user JWT forwarded to backend tool calls"
 }
 ```
 
@@ -169,10 +170,14 @@ data, it says so (e.g. `"I don't have data for that zone."`) rather than guessin
 
 **Defined tools (Phase 4):**
 
-- `get_recent_assessments(limit, severity_filter)` → queries backend Mongo-backed API.
+- `get_recent_assessments(severity_filter, limit)` → queries backend Mongo-backed API.
+- `get_assessment(id)` → full record for one assessment (confidence, probs, chain fields).
 - `get_chain_status(cid)` → calls backend `/chain/verify/:cid` (stubbed in Phase 4, real in Phase 5).
 - `summarize_zone(geojson)` → stats summary (area, class, confidence).
-- `trigger_alert(zone_id, message)` *(stretch)* → writes an alert record.
+
+The agent may run the tools through an LLM tool-calling loop (Anthropic or OpenAI, see
+`LLM_PROVIDER`) or, when no key is set, through a deterministic fallback agent. Both paths
+obey the same grounding rule above.
 
 ---
 
