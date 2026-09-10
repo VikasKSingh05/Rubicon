@@ -9,7 +9,7 @@ test("agent-service exposes a health endpoint", async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.status, "ok");
   assert.equal(res.body.service, "agent-service");
-  assert.ok(["anthropic", "openai", "fallback"].includes(res.body.llm));
+  assert.ok(["anthropic", "openai", "openrouter", "fallback"].includes(res.body.llm));
 });
 
 test("agent-service exposes a tools manifest", async () => {

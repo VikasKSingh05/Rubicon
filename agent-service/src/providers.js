@@ -77,15 +77,19 @@ function anthropicAppendResults(messages, assistantMessage, toolUses, results) {
   return next;
 }
 
-// ---- OpenAI ---------------------------------------------------------------
+// ---- OpenAI / OpenRouter (OpenAI-compatible) -----------------------------------
 
-async function openaiCall(model, messages) {
+function bearer(keyNames) {
+  for (const name of keyNames) {
+    if (process.env[name]) return process.env[name];
+  }
+  throw new Error(`missing API key (tried ${keyNames.join(", ")})`);
+}
+
+async function openaiCompatibleCall({ url, model, keyNames, messages }) {
   const data = await postJson(
-    "https://api.openai.com/v1/chat/completions",
-    {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      "content-type": "application/json",
-    },
+    url,
+    { Authorization: `Bearer ${bearer(keyNames)}`, "content-type": "application/json" },
     {
       model,
       messages,
@@ -113,6 +117,24 @@ async function openaiCall(model, messages) {
   };
 }
 
+function openaiCall(model, messages) {
+  return openaiCompatibleCall({
+    url: "https://api.openai.com/v1/chat/completions",
+    model,
+    keyNames: ["OPENAI_API_KEY"],
+    messages,
+  });
+}
+
+function openrouterCall(model, messages) {
+  return openaiCompatibleCall({
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    model,
+    keyNames: ["OPENROUTER_API_KEY", "OPENAI_API_KEY"],
+    messages,
+  });
+}
+
 function openaiAppendResults(messages, assistantMessage, toolUses, results) {
   const next = [...messages, assistantMessage];
   toolUses.forEach((tu, i) => {
@@ -130,6 +152,10 @@ const PROVIDERS = {
     call: (messages) => openaiCall(config.llm.openaiModel, messages),
     appendResults: openaiAppendResults,
   },
+  openrouter: {
+    call: (messages) => openrouterCall(config.llm.openrouterModel, messages),
+    appendResults: openaiAppendResults,
+  },
 };
 
 // Runs the tool-calling loop. opts: { query, assessmentId, token, backendUrl, fetch }.
@@ -140,7 +166,7 @@ export async function runAgent(opts) {
   if (!provider) throw new Error(`unknown LLM_PROVIDER: ${config.llm.provider}`);
 
   const toolOpts = { backendUrl: opts.backendUrl, token: opts.token, fetchImpl: opts.fetch };
-  const messages = [{ role: "user", content: opts.query }];
+  let messages = [{ role: "user", content: opts.query }];
   const toolCalls = [];
   const textParts = [];
 
