@@ -1,0 +1,14 @@
+{
+  "name": "rubicon-contracts",
+  "version": "0.1.0",
+  "description": "Rubicon PramaanLedger — Polygon Amoy deploy tooling (manual, not used by CI).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "node scripts/deploy.js"
+  },
+  "devDependencies": {
+    "ethers": "^6.17.0",
+    "solc": "^0.8.24"
+  }
+}

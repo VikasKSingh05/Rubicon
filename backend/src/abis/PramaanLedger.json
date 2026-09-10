@@ -1,0 +1,49 @@
+[
+  {
+    "type": "function",
+    "name": "logAssessment",
+    "stateMutability": "nonpayable",
+    "inputs": [
+      { "name": "hsiCid", "type": "string" },
+      { "name": "lidarCid", "type": "string" },
+      { "name": "prediction", "type": "string" }
+    ],
+    "outputs": []
+  },
+  {
+    "type": "function",
+    "name": "getEntry",
+    "stateMutability": "view",
+    "inputs": [{ "name": "id", "type": "uint256" }],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "components": [
+          { "name": "hsiCid", "type": "string" },
+          { "name": "lidarCid", "type": "string" },
+          { "name": "prediction", "type": "string" },
+          { "name": "timestamp", "type": "uint256" },
+          { "name": "logger", "type": "address" }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "function",
+    "name": "totalEntries",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "uint256" }]
+  },
+  {
+    "type": "event",
+    "name": "AssessmentLogged",
+    "inputs": [
+      { "name": "id", "type": "uint256", "indexed": true },
+      { "name": "hsiCid", "type": "string", "indexed": false },
+      { "name": "prediction", "type": "string", "indexed": false },
+      { "name": "timestamp", "type": "uint256", "indexed": false }
+    ]
+  }
+]
