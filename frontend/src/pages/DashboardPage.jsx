@@ -6,26 +6,49 @@ import MapView from "../components/MapView.jsx";
 import SeverityLegend from "../components/SeverityLegend.jsx";
 import UploadModal from "../components/UploadModal.jsx";
 
+const PAGE_SIZE = 50;
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [assessments, setAssessments] = useState([]);
+  const [total, setTotal] = useState(0);
   const [active, setActive] = useState(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [loadError, setLoadError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      const data = await api("/assessments");
+      const data = await api(`/assessments?limit=${PAGE_SIZE}&offset=0`);
       setAssessments(data.assessments);
-      setLoadError(null);
+      setTotal(data.total);
     } catch (err) {
       setLoadError(err.message);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  async function handleLoadMore() {
+    setLoadError(null);
+    setLoadingMore(true);
+    try {
+      const data = await api(`/assessments?limit=${PAGE_SIZE}&offset=${assessments.length}`);
+      setAssessments((prev) => [...prev, ...data.assessments]);
+      setTotal(data.total);
+    } catch (err) {
+      setLoadError(err.message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   function handleSelect(item) {
     setActive(item);
@@ -44,6 +67,10 @@ export default function DashboardPage() {
           assessments={assessments}
           activeId={active?.id}
           onSelect={handleSelect}
+          loading={loading}
+          canLoadMore={!loading && assessments.length < total}
+          loadingMore={loadingMore}
+          onLoadMore={handleLoadMore}
         />
         <main className="relative min-w-0 flex-1">
           <MapView

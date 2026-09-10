@@ -166,6 +166,11 @@ test("assessments list returns uploaded assessments for the user", async () => {
   assert.ok(item.id);
   assert.ok(item.prediction);
   assert.ok(item.center && typeof item.center.lng === "number");
+  assert.ok(
+    item.geojson_polygon &&
+      item.geojson_polygon.type === "Polygon" &&
+      Array.isArray(item.geojson_polygon.coordinates),
+  );
 });
 
 test("assessment detail returns full document and chain fields exist", async () => {

@@ -8,34 +8,88 @@ const STEPS = [
   { key: "done", label: "Done" },
 ];
 
-export function FileDropzone({ label, accept, file, onFile }) {
+const ACCEPT = {
+  hsi: [".tif", ".tiff"],
+  lidar: [".las", ".laz"],
+};
+
+const MAX_BYTES = 100 * 1024 * 1024;
+
+function fileError(file, kind) {
+  if (!file) return null;
+  const ext = `.${file.name.split(".").pop()?.toLowerCase()}`;
+  if (!ACCEPT[kind].includes(ext)) {
+    return `Only ${ACCEPT[kind].join(", ")} files are supported.`;
+  }
+  if (file.size > MAX_BYTES) return "File exceeds the 100 MB limit.";
+  return null;
+}
+
+export function FileDropzone({ label, kind, file, error, onFile }) {
   const inputRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const accept = ACCEPT[kind].join(",");
+
+  function pick(f) {
+    setDragging(false);
+    if (f) onFile(f);
+  }
+
   return (
     <div>
       <label className="mb-1 block text-sm font-medium text-slate-700">{label}</label>
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`Choose ${label} file`}
         onClick={() => inputRef.current?.click()}
-        className="flex min-h-24 w-full flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 text-center transition-colors hover:border-primary hover:bg-slate-100"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          pick(e.dataTransfer.files?.[0] || null);
+        }}
+        className={`flex min-h-24 w-full cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed text-center transition-colors ${
+          dragging
+            ? "border-primary bg-primary/10"
+            : "border-slate-300 bg-slate-50 hover:border-primary hover:bg-slate-100"
+        }`}
       >
         {file ? (
-          <span className="px-2 text-sm font-medium text-primary">{file.name}</span>
+          <span className="px-2 text-sm font-medium text-primary">
+            {file.name}{" "}
+            <span className="text-slate-400">({(file.size / 1024).toFixed(0)} KB)</span>
+          </span>
         ) : (
           <>
             <span className="text-xl">📄</span>
-            <span className="mt-1 text-xs text-slate-500">
-              Click to choose ({accept})
+            <span className="mt-1 px-2 text-xs text-slate-500">
+              Click or drop ({accept})
             </span>
           </>
         )}
-      </button>
+      </div>
       <input
         ref={inputRef}
         type="file"
         accept={accept}
         className="hidden"
-        onChange={(e) => onFile(e.target.files?.[0] || null)}
+        onChange={(e) => pick(e.target.files?.[0] || null)}
       />
+      {error && (
+        <p className="mt-1 text-xs text-severity-severe" role="alert">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -73,8 +127,6 @@ export function ProgressStepper({ activeStep }) {
   );
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 export default function UploadModal({ onClose, onCreated }) {
   const [hsi, setHsi] = useState(null);
   const [lidar, setLidar] = useState(null);
@@ -90,32 +142,29 @@ export default function UploadModal({ onClose, onCreated }) {
     setError(null);
   };
 
-  const canSubmit = hsi && lidar && phase !== "in-progress";
+  const hsiFileError = fileError(hsi, "hsi");
+  const lidarFileError = fileError(lidar, "lidar");
+  const canSubmit =
+    hsi && lidar && !hsiFileError && !lidarFileError && phase !== "in-progress";
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!canSubmit) return;
     setError(null);
     setPhase("in-progress");
-    setActiveStep(0);
+    setActiveStep(0); // Uploading — the server runs analyze + verify in the same request
 
-    // Steps 2–3 are simulated with delays in Phase 1 so the UX pattern exists
-    // before the real pipeline (AI + chain) lands in Phases 3/5.
     try {
-      setActiveStep(1); // Analyzing (simulated)
-      await sleep(1500);
-      setActiveStep(2); // Verifying on-chain (simulated)
-      await sleep(1800);
-
       const form = new FormData();
       form.append("hsi", hsi);
       form.append("lidar", lidar);
       const data = await api("/upload", { method: "POST", body: form });
 
-      setActiveStep(3);
-      await sleep(400);
+      setActiveStep(STEPS.length); // all steps complete server-side
+      await new Promise((r) => setTimeout(r, 450)); // let "Done" register before closing
       onCreated(data);
     } catch (err) {
+      setActiveStep(0);
       setError(err.message);
       setPhase("error");
     }
@@ -141,21 +190,23 @@ export default function UploadModal({ onClose, onCreated }) {
           </button>
         </div>
 
-        {phase === "in-progress" && activeStep < 3 ? (
+        {phase === "in-progress" && activeStep < STEPS.length ? (
           <ProgressStepper activeStep={activeStep} />
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="space-y-4">
               <FileDropzone
                 label="Hyperspectral (HSI)"
-                accept=".tiff,.tif"
+                kind="hsi"
                 file={hsi}
+                error={phase === "error" || hsi ? hsiFileError : null}
                 onFile={setHsi}
               />
               <FileDropzone
                 label="LiDAR"
-                accept=".las"
+                kind="lidar"
                 file={lidar}
+                error={phase === "error" || lidar ? lidarFileError : null}
                 onFile={setLidar}
               />
             </div>
