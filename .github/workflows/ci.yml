@@ -67,6 +67,26 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+
+      - name: Install contracts deps
+        working-directory: contracts
+        run: npm ci
+
+      - name: Compile-check PramaanLedger
+        working-directory: contracts
+        run: npm run compile
+
   ai-engine:
     runs-on: ubuntu-latest
     steps:

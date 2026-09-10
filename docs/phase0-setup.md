@@ -12,8 +12,7 @@
 ## 2. Pinata (IPFS) — free tier
 - [ ] Create account at https://app.pinata.cloud
 - [ ] Generate an API **JWT** (`app.pinata.cloud` → API Keys)
-- [ ] Copy JWT → `PINATA_JWT` in `.env`
-- [ ] Set `PINATA_GATEWAY` (default: `https://gateway.pinata.cloud/ipfs/`)
+- [ ] Copy JWT → `PINATA_JWT` in `.env` (CIDs are computed locally regardless; pinning needs the JWT)
 
 ## 3. Fresh testnet-only MetaMask wallet + faucet POL
 - [ ] **Create a brand-new MetaMask wallet dedicated to this project only.**
@@ -28,13 +27,15 @@
 - [ ] After Phase 5 deployment, set `CONTRACT_ADDRESS` in `.env`
 
 ## 4. LLM API key (configurable — see Phase 0 decision)
-We support **both** providers behind `LLM_PROVIDER` (`anthropic` | `openai`).
+We support **three** providers behind `LLM_PROVIDER` (`anthropic` | `openai` | `openrouter`), or empty for the deterministic tool-grounded fallback agent.
 
 - **[ ] Anthropic** → https://console.anthropic.com → `ANTHROPIC_API_KEY`
-  - model: `AGENT_MODEL` (default `claude-sonnet-4-6`; 🔴 confirm current name at
+  - model: `AGENT_MODEL` (default `claude-sonnet-4-5`; 🔴 confirm current name at
     https://docs.claude.com at build time)
 - **[ ] OpenAI** → https://platform.openai.com/api-keys → `OPENAI_API_KEY`
   - model: `OPENAI_MODEL` (default `gpt-4o`)
+- **[ ] OpenRouter** → https://openrouter.ai → `OPENROUTER_API_KEY`
+  - model: `OPENROUTER_MODEL` (any OpenRouter slug, default `anthropic/claude-3.5-sonnet`)
 
 > One is enough to run. Set `LLM_PROVIDER` to whichever you hold a key for.
 

@@ -24,7 +24,7 @@
 internally; the **frontend never talks to the AI engine directly** — it only ever receives an
 assessment via the backend.
 
-**Request body** (Phase 0/1 stub ignores content; Phase 3 sends raw `.tiff`/`.las` files):
+**Request body** (multipart `form-data`; Phase 6 sends the real uploaded buffers):
 
 ```json
 {
@@ -48,9 +48,12 @@ assessment via the backend.
     "type": "Polygon",
     "coordinates": [[[lng, lat], [lng, lat], [lng, lat], [lng, lat]]]
   },
-  "model_version": "stub-v0"
+  "model_version": "mamba_transformer-v1"
 }
 ```
+
+> `model_version` is `mamba_transformer-v1` when the real engine responds, or `stub-v0`
+> when the engine is unreachable and the backend degrades to the contract-identical stub.
 
 | Field             | Type                 | Notes                                                |
 | ----------------- | -------------------- | ---------------------------------------------------- |
@@ -58,7 +61,7 @@ assessment via the backend.
 | `confidence`      | number (0–1)         | Model confidence in the predicted class.             |
 | `class_probs`     | object<string,number>| Softmax probabilities across all damage classes.     |
 | `geojson_polygon` | GeoJSON Polygon      | Map polygon for the assessed zone (lng, lat coords). |
-| `model_version`   | string               | e.g. `stub-v0`, later `mamba-fusion-v1`.             |
+| `model_version`   | string               | Real model: `mamba_transformer-v1`. When the engine is unreachable the backend degrades to `stub-v0`. |
 
 **Contract guarantee:** swapping the Phase-1 stub for the real Phase-3 model requires **zero**
 frontend changes, because the response shape never changes.
@@ -97,8 +100,10 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, `accept .tiff/.las`
 }
 ```
 
-> In Phase 0/1 the analysis and on-chain steps are **simulated**; the response reports
-> `state: "analyzed"` (with a fake `txHash`) until Phase 5 wires the real chain.
+> The analysis step is **real**: the backend forwards the uploaded files to `POST /predict`
+> and stores the engine's response. `state` is `analyzed` (or `chain_logged` when the Amoy
+> proof layer is configured — see §5). If the engine is unreachable the backend degrades to
+> the contract-identical stub (`model_version: "stub-v0"`).
 
 | Field      | Type                        | Notes                                        |
 | ---------- | --------------------------- | -------------------------------------------- |
@@ -111,6 +116,46 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, `accept .tiff/.las`
 | `model_version` | string                | Model identifier.                            |
 | `createdAt` | string (ISO-8601)          | Server timestamp.                            |
 | `links.detail` | string                 | Relative URL to the detail endpoint.         |
+
+---
+
+## 2-b. Backend `GET /assessments` (list)
+
+Returns the caller's assessments, newest first. Paginated with `?limit=` (default 50, max 200)
+and `?offset=` (default 0).
+
+**Response `200 OK`:**
+
+```json
+{
+  "assessments": [
+    {
+      "id": "665d8f3e2f3a4b5c6d7e8f90",
+      "prediction": "Severe Collapse",
+      "confidence": 0.91,
+      "severity": "severe",
+      "state": "analyzed",
+      "center": { "lng": -95.36, "lat": 29.76 },
+      "txHash": null,
+      "chainVerified": false,
+      "createdAt": "2026-09-07T12:00:00.000Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+| Field         | Type              | Notes                                             |
+| ------------- | ----------------- | ------------------------------------------------- |
+| `assessments` | array<ListItem>   | Map-marker payloads (envelope `center`).          |
+| `total`       | number            | Total items for the user (for pagination).        |
+| `limit`       | number            | Echo of the applied limit.                        |
+| `offset`      | number            | Echo of the applied offset.                       |
+
+`severity` uses the lowercase enum `none | moderate | severe` (see §6). `txHash`/`chainVerified`
+power the map-popup chain affordance (null/empty when the proof layer was simulated).
 
 ---
 
@@ -137,7 +182,7 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, `accept .tiff/.las`
   "tool_calls": [
     {
       "tool": "get_recent_assessments",
-      "input": { "severity_filter": "Severe", "limit": 20 },
+      "input": { "severity_filter": "severe", "limit": 20 },
       "ok": true
     },
     {
@@ -286,5 +331,6 @@ Verified-on-chain badge: `#0EA5E9` with a checkmark icon (visually prominent —
 | ---------------------------- | --------------------------------------------------- |
 | AI `/predict` response       | [`contracts/predict.response.json`](../contracts/predict.response.json) |
 | Backend `/upload` response   | [`contracts/upload.response.json`](../contracts/upload.response.json)   |
+| Backend `GET /assessments`   | [`contracts/assessments.list.response.json`](../contracts/assessments.list.response.json) |
 | Agent `/agent/query` response| [`contracts/agent-query.response.json`](../contracts/agent-query.response.json) |
 | Mongo `Assessment` schema     | [`contracts/assessment.schema.json`](../contracts/assessment.schema.json) |

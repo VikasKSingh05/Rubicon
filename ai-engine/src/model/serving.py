@@ -33,7 +33,13 @@ def load_runtime(model_dir):
 
     cp_path = Path(model_dir) / "model.pt"
     pca_path = Path(model_dir) / "pca.pkl"
-    checkpoint = torch.load(cp_path, map_location="cpu", weights_only=False)
+    # Prefer the safe weights_only loader; fall back for legacy artifacts that
+    # embed non-tensor python objects (e.g. numpy arrays). If both fail the
+    # error propagates to callers (get_runtime) which degrade cleanly.
+    try:
+        checkpoint = torch.load(cp_path, map_location="cpu", weights_only=True)
+    except Exception:
+        checkpoint = torch.load(cp_path, map_location="cpu", weights_only=False)
     pca = pickle.loads(pca_path.read_bytes())
 
     cfg = checkpoint["config"]

@@ -5,6 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "compile": "node scripts/compile-check.js",
     "deploy": "node scripts/deploy.js"
   },
   "devDependencies": {

@@ -14,7 +14,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { ethers } from "ethers";
-import solc from "solc";
+import { compileContract } from "./compile.js";
 
 const rpcUrl = process.env.AMOY_RPC_URL || "https://rpc-amoy.polygon.technology";
 const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
@@ -26,25 +26,7 @@ if (!privateKey) {
   process.exit(1);
 }
 
-const source = readFileSync(new URL("../contracts/PramaanLedger.sol", import.meta.url), "utf8");
-
-const input = {
-  language: "Solidity",
-  sources: { "PramaanLedger.sol": { content: source } },
-  settings: {
-    optimizer: { enabled: true, runs: 200 },
-    outputSelection: { "*": { "*": ["abi", "evm.bytecode"] } },
-  },
-};
-
-const output = JSON.parse(solc.compile(JSON.stringify(input)));
-const errors = output.errors?.filter((e) => e.severity === "error") ?? [];
-if (errors.length > 0) {
-  console.error("Compilation failed:");
-  errors.forEach((e) => console.error(`  ${e.formattedMessage}`));
-  process.exit(1);
-}
-const compiled = output.contracts["PramaanLedger.sol"].PramaanLedger;
+const compiled = compileContract();
 
 console.log(`[deploy] provider=${rpcUrl} chainId=${chainId}`);
 console.log(`[deploy] deploying from ${new ethers.Wallet(privateKey).address} ...`);
@@ -56,7 +38,7 @@ if (Number(network.chainId) !== chainId) {
   process.exit(1);
 }
 const wallet = new ethers.Wallet(privateKey, provider);
-const factory = new ethers.ContractFactory(compiled.abi, compiled.evm.bytecode.object, wallet);
+const factory = new ethers.ContractFactory(compiled.abi, compiled.bytecode, wallet);
 const contract = await factory.deploy();
 await contract.waitForDeployment();
 const address = await contract.getAddress();

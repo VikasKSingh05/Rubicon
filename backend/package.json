@@ -1,7 +1,7 @@
 {
   "name": "rubicon-backend",
   "version": "0.2.0",
-  "description": "Rubicon backend — REST API for upload, assessments, auth (Phase 1 stub vertical slice).",
+  "description": "Rubicon backend — Express API: upload, real AI inference, IPFS/Amoy proof, assessments, auth",
   "private": true,
   "type": "module",
   "main": "src/index.js",

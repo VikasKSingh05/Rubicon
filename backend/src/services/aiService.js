@@ -3,7 +3,7 @@ import { config } from "../config.js";
 const CLASSES = ["None", "Moderate", "Severe Collapse"];
 const STUB_MODEL_VERSION = "stub-v0";
 
-// Basae around Houston (UTM zone 15 / ~29.76N, 95.36W).
+// Based around Houston (UTM zone 15 / ~29.76N, 95.36W).
 const HOUSTON = { lng: -95.36, lat: 29.76 };
 
 function randomClassProbs() {
@@ -48,23 +48,34 @@ function stubPredict() {
   };
 }
 
-/**
- * Run inference. Phase 1: returns a randomized stub that matches the /predict contract
- * exactly. If the real AI engine is reachable, it is used instead — this is the only
- * seam that changes when the Phase 3 model lands.
- */
-export async function runInference() {
+// Graceful-degrade seam: when the real engine is reachable it gets the actual
+// uploaded buffers as multipart; on any transport/parse failure we fall back to
+// the contract-identical randomized stub so uploads never hard-fail. The stub is
+// distinguishable via model_version "stub-v0".
+export async function runInference(files = {}) {
   try {
+    const form = new FormData();
+    if (files?.hsi?.buffer) {
+      form.append("hsi", new Blob([files.hsi.buffer]), files.hsi.originalname || "scan.tif");
+    }
+    if (files?.lidar?.buffer) {
+      form.append("lidar", new Blob([files.lidar.buffer]), files.lidar.originalname || "scan.las");
+    }
+
     const res = await fetch(`${config.aiEngineUrl}/predict`, {
       method: "POST",
-      signal: AbortSignal.timeout(3000),
+      body: form,
+      signal: AbortSignal.timeout(30_000),
     });
-    if (res.ok) {
-      const body = await res.json();
-      if (body && body.prediction && body.geojson_polygon) return body;
+    if (!res.ok) {
+      console.warn(`[aiService] engine responded ${res.status} — using stub`);
+      return stubPredict();
     }
-  } catch {
-    // fall through to the stub
+    const body = await res.json();
+    if (body && body.prediction && body.geojson_polygon) return body;
+    console.warn("[aiService] unexpected /predict payload — using stub");
+  } catch (err) {
+    console.warn(`[aiService] engine unreachable (${err?.message}) — using stub`);
   }
   return stubPredict();
 }
