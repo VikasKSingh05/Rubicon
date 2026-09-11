@@ -94,22 +94,34 @@ training path below.
 **Limits**
 - Model quality is near-baseline (reported test accuracy ≈ 0.33, macro-F1 ≈ 0.25) on a tiny
   11-train/2-val/3-test patch set. This is a **reference implementation**, not operational.
-- `/chain/verify` event scan begins at block 0 (acceptable for a low-traffic testnet ledger;
-  a production ledger should index by season and store `lidarCid` in the on-chain event too).
-- Backend holds uploads in memory up to 2×100 MB/request; originals are only preserved via the
-  Pinata pin (no local copy) once pinned.
-- JWT secret falls back to a dev default (overridden via `.env`); tokens live in `localStorage`
-  (documented XSS trade-off for a student project).
-- `get_runtime` takes preference-ordered `weights_only=True` torch loading; legacy artifacts fall
-  back to unpickling (see `serving.py`). The mounted model directory itself is operator-controlled.
+- `/chain/verify` event scan now begins from a persisted `ChainIndex` cursor instead of
+  block 0 (Phase 7). On a very low-traffic testnet the scan reaches depth 0 fast; a
+  production ledger should index per season for near-instant lookups.
+- Originals are spooled to a per-request temp dir (magic-byte validated TIFF/LASF) and
+  persisted under `STORAGE_DIR/<assessmentId>/`; they are downloadable owner-scoped via
+  `GET /files/:id/:kind`. Multi-hundred-MB files are still read fully into memory once
+  during inference — a streaming proxy to the engine is a later optimization.
+- JWT secret is required in production (boot fails on a missing/dev default); access
+  tokens are short-lived (default 15m) and held in browser **memory only**. Refresh uses
+  opaque 256-bit tokens stored sha-256'd in Mongo (token blinding), delivered as
+  httpOnly/SameSite=Strict/Path=/auth cookies, rotating on every use and revocable.
+- `get_runtime` now uses only `weights_only=True` torch loading plus a `RestrictedUnpickler`
+  allow-list for `pca.pkl` (no unsafe fallback); the mounted model directory is operator
+  controlled, and corrupt artifacts return a clean 503 instead of executing pickles.
 
 **Posture**
-- `.env` is gitignored; `.env.example` documents every key. Never commit real keys.
-- Passwords bcrypt-hashed (cost 10, `select:false`); assessment queries are user-scoped.
+- `.env` is gitignored; `.env.example` documents every key; `NODE_ENV=production`
+  enforces secret checks on boot. Never commit real keys.
+- Passwords bcrypt-hashed (cost 10, `select:false`); assessment and file queries are
+  user-scoped; `change-password` revokes every other session.
 - Graceful-degrade everywhere: engine unreachable → stub; no chain keys → simulated proof;
   no LLM key → deterministic agent. All covered by tests.
-- Known hardening not yet applied: rate limiting on auth/upload, server-rendered CSP, token
-  blinding/short-lived SID. These are called out rather than hidden.
+- Hardening applied and tested (Phase 7): rate limiting on auth/upload (429), CSP +
+  restricted CORS (no wildcard), cookie refresh rotation, short-lived access tokens,
+  magic-byte upload validation, path-traversal-safe file downloads, production secret
+  gating, Prometheus `/metrics`, and per-request `requestId` logs. Remaining known items
+  are self-inflicted reference-implementation limits (small dataset, near-baseline model)
+  rather than security gaps.
 
 ## 7. Deliberate trade-offs
 

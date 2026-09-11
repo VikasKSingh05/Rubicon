@@ -8,6 +8,11 @@ import DashboardPage from "../src/pages/DashboardPage.jsx";
 import UploadModal from "../src/components/UploadModal.jsx";
 import AssessmentPage from "../src/pages/AssessmentPage.jsx";
 import MapView from "../src/components/MapView.jsx";
+import AgentChatSlot from "../src/components/AgentChatSlot.jsx";
+
+vi.mock("../src/lib/agent.js", () => ({
+  agentQuery: vi.fn(),
+}));
 
 vi.mock("react-leaflet", () => ({
   MapContainer: ({ children }) => <div>{children}</div>,
@@ -26,6 +31,7 @@ vi.mock("../src/lib/api.js", () => ({
   },
   initAuth: vi.fn(async () => null),
   refreshAuth: vi.fn(async () => null),
+  downloadBlob: vi.fn(),
 }));
 
 import { api } from "../src/lib/api.js";
@@ -199,6 +205,26 @@ describe("DashboardPage", () => {
     await flush();
     expect(screen.queryByText("Load more")).not.toBeInTheDocument();
   });
+
+  it("refreshes the list when the refresh button is clicked", async () => {
+    api.mockResolvedValue({ assessments: [asst()], total: 1, limit: 50, offset: 0 });
+    render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={["/"]}>
+          <DashboardPage />
+        </MemoryRouter>
+      </AuthProvider>
+    );
+
+    expect(await screen.findByText("Moderate")).toBeInTheDocument();
+    const before = api.mock.calls.length;
+
+    const refreshButton = document.querySelector('button[title="Refresh"]');
+    expect(refreshButton).not.toBeNull();
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(api.mock.calls.length).toBeGreaterThan(before));
+  });
 });
 
 describe("AssessmentPage", () => {
@@ -235,6 +261,83 @@ describe("AssessmentPage", () => {
 
     expect((await screen.findAllByText(/Moderate/i)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Confidence/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows download links for persisted originals and re-verifies on chain", async () => {
+    const fresh = asst({ id: "a1", hsiCid: "QmHsi1", lidarCid: "QmLid1", chainVerified: false });
+    api.mockResolvedValue(fresh);
+    render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={["/assessments/a1"]}>
+          <Routes>
+            <Route path="/assessments/:id" element={<AssessmentPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
+    );
+
+    expect((await screen.findAllByText(/HSI/i)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/LiDAR/i)).toBeInTheDocument();
+
+    api.mockResolvedValue({ cid: "QmHsi1", verified: true, assessmentId: "a1", state: "chain_logged", txHash: "0xtx" });
+    api.mockResolvedValueOnce(fresh);
+    fireEvent.click(screen.getByText("Re-verify on chain"));
+
+    await waitFor(() => {
+      const verifyCall = api.mock.calls.find(([p]) => p.startsWith("/chain/verify/"));
+      expect(verifyCall).toBeTruthy();
+    });
+    await waitFor(() => expect(screen.getByText("Re-verify on chain")).not.toBeDisabled());
+  });
+});
+
+describe("AgentChatSlot", () => {
+  it("shows the assistant answer with a timestamp", async () => {
+    const { agentQuery } = await import("../src/lib/agent.js");
+    agentQuery.mockResolvedValue({
+      answer: "The zone is severe.",
+      tool_calls: [{ tool: "get_assessments", ok: true }],
+      createdAt: "2026-09-08T10:00:00.000Z",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentChatSlot assessmentId="a1" />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Ask the agent…"), {
+      target: { value: "How severe?" },
+    });
+    fireEvent.click(screen.getByText("Ask"));
+
+    expect(await screen.findByText("The zone is severe.")).toBeInTheDocument();
+    expect(screen.getByText(/🔧 get_assessments/)).toBeTruthy();
+  });
+
+  it("offers a retry button when the agent service fails", async () => {
+    const { agentQuery } = await import("../src/lib/agent.js");
+    agentQuery.mockRejectedValueOnce(new Error("down"));
+    agentQuery.mockResolvedValueOnce({ answer: "Recovered answer.", tool_calls: [], createdAt: "2026-09-08T10:05:00.000Z" });
+
+    render(
+      <MemoryRouter>
+        <AgentChatSlot assessmentId="a1" />
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("Ask the agent…"), {
+      target: { value: "Status?" },
+    });
+    fireEvent.click(screen.getByText("Ask"));
+
+    expect(await screen.findByText(/couldn't reach the agent service/i)).toBeInTheDocument();
+
+    const retry = screen.getByText("Retry");
+    fireEvent.click(retry);
+
+    expect(await screen.findByText("Recovered answer.")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
   });
 });
 

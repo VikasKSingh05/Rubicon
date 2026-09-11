@@ -61,7 +61,11 @@ export default function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <TopBar onUpload={() => setUploadOpen(true)} />
+      <TopBar
+          onUpload={() => setUploadOpen(true)}
+          onRefresh={loading ? null : load}
+          refreshing={loading}
+        />
       <div className="flex min-h-0 flex-1">
         <Sidebar
           assessments={assessments}

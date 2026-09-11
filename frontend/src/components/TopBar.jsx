@@ -11,7 +11,7 @@ function formatTime(iso) {
   }
 }
 
-export default function TopBar({ onUpload }) {
+export default function TopBar({ onUpload, onRefresh, refreshing }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   return (
@@ -30,6 +30,16 @@ export default function TopBar({ onUpload }) {
         <span className="hidden max-w-48 truncate text-xs text-white/80 sm:inline">
           {user?.email}
         </span>
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+            title="Refresh"
+          >
+            {refreshing ? "↻" : "⟳"}
+          </button>
+        )}
         <button
           onClick={onUpload}
           className="rounded-md bg-verify px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-verify/90"

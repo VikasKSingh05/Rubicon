@@ -7,13 +7,18 @@ Mamba–Transformer fusion model, then pins the evidence to IPFS and logs an imm
 on the **Polygon Amoy testnet** — all explorable through a map-based dashboard and a
 tool-grounded AI assistant.
 
-> ⚠️ **Project status: Phase 6** — vertical slice is live end-to-end (register/login, upload,
-> map, detail view, AI assistant). Uploaded files are forwarded to the real Mamba–Transformer
-> fusion model at `/predict`, uploads are content-addressed as IPFS CIDv0 values (Pinata
-> pinning when configured), and the PramaanLedger is logged on Polygon Amoy when the chain
-> layer is configured. Without engine/`PINATA_JWT`/Amoy keys each layer degrades to a clearly
-> marked deterministic fallback so the app always runs. The agent answers from live backend
-> data via tools (LLM-backed with a key, deterministic tool-grounded fallback otherwise).
+> ⚠️ **Project status: Phase 7** — hardened vertical slice is live end-to-end
+> (register/login, upload, map, detail view, AI assistant, original-file
+> downloads, chain re-verification, password change). Sessions use short-lived
+> access tokens (browser memory only) + rotating httpOnly refresh cookies;
+> auth/upload are rate-limited and uploads are magic-byte validated before
+> inference. Uploads are content-addressed as IPFS CIDv0 values (Pinata pinning
+> when configured) and the PramaanLedger is logged on Polygon Amoy when the
+> chain layer is configured. Without engine/`PINATA_JWT`/Amoy keys each layer
+> degrades to a clearly marked deterministic fallback so the app always runs.
+> The agent answers from live backend data via tools (LLM-backed with a key,
+> deterministic tool-grounded fallback otherwise). Production deployment
+> guidance lives in [docs/deploy.md](docs/deploy.md).
 
 ## Monorepo layout
 
@@ -82,4 +87,5 @@ mirrored as JSON under [`contracts/`](contracts/). Build against these exactly.
 | 3 | Real DL model (Mamba–Transformer fusion) |
 | 4 | Agentic AI layer (tool-grounded chat) |
 | 5 | IPFS + blockchain layer (Amoy) |
-| 6 | Integration, testing, polish, report |
+| 6          | Integration, testing, polish, report |
+| 7          | Hardening: session security, rate limiting, artifact persistence, ops docs |
