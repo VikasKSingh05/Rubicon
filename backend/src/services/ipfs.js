@@ -5,6 +5,9 @@
 
 import { createHash } from "node:crypto";
 import { config } from "../config.js";
+import { makeLogger } from "../middleware/logger.js";
+
+const logger = makeLogger("ipfs");
 
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 

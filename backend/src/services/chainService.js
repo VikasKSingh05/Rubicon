@@ -7,8 +7,28 @@
 
 import { createHash } from "node:crypto";
 import { ethers } from "ethers";
+import mongoose from "mongoose";
 import ABI from "../abis/PramaanLedger.json" with { type: "json" };
 import { config } from "../config.js";
+import { makeLogger } from "../middleware/logger.js";
+
+const logger = makeLogger("chain");
+
+// Persisted cursor so verifyOnChain never rescans from block 0 (which grows
+// unbounded and is slow on Amoy). Falls back to the last `SCAN_FALLBACK_BLOCKS`
+// when no cursor exists yet.
+const SCAN_FALLBACK_BLOCKS = 5000;
+
+const chainIndexSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, unique: true, default: "verify" },
+    lastScannedBlock: { type: Number, required: true, default: 0 },
+  },
+  { timestamps: true },
+);
+
+const ChainIndex =
+  mongoose.models.ChainIndex || mongoose.model("ChainIndex", chainIndexSchema);
 
 export function chainConfigured() {
   return Boolean(config.contractAddress && config.deployerPrivateKey && config.amoyRpcUrl);
@@ -40,10 +60,7 @@ export function buildContract(deps = {}) {
  */
 export async function logAssessment({ hsiCid, lidarCid, prediction }, deps = {}) {
   if (!chainConfigured()) {
-    console.warn(
-      "[chain] Amoy not configured — writing a simulated on-chain record. " +
-        "Set AMOY_RPC_URL, DEPLOYER_PRIVATE_KEY and CONTRACT_ADDRESS for a real record.",
-    );
+    logger.warn("Amoy not configured — writing a simulated on-chain record");
     return simulatedLog({ hsiCid, lidarCid });
   }
   const contract = buildContract(deps);
@@ -53,16 +70,36 @@ export async function logAssessment({ hsiCid, lidarCid, prediction }, deps = {})
 }
 
 /**
- * Look for a CID in the ledger's AssessmentLogged events.
- * Returns { txHash, blockNumber, timestamp } or null (unknown / chain not reachable).
+ * Look for a CID in the ledger's AssessmentLogged events, scanning only from the
+ * persisted cursor (never block 0). Returns { txHash, blockNumber, timestamp }
+ * or null (unknown / chain not reachable).
  */
 export async function verifyOnChain(cid, deps = {}) {
   if (!chainConfigured()) return null;
   try {
     const provider = deps.provider || new ethers.JsonRpcProvider(config.amoyRpcUrl);
-    const contract = new ethers.Contract(config.contractAddress, ABI, provider);
-    const events = await contract.queryFilter(contract.filters.AssessmentLogged(), 0);
+    const contract =
+      deps.contract || new ethers.Contract(config.contractAddress, ABI, provider);
+
+    const latestBlock = deps.latestBlock ?? (await provider.getBlockNumber());
+    let cursor = await ChainIndex.findOne({ key: "verify" });
+    let fromBlock = cursor?.lastScannedBlock ?? Math.max(0, latestBlock - SCAN_FALLBACK_BLOCKS);
+    if (fromBlock > latestBlock) fromBlock = latestBlock;
+
+    const events = await contract.queryFilter(
+      contract.filters.AssessmentLogged(),
+      fromBlock,
+      latestBlock,
+    );
     const match = events.find((e) => String(e.args?.hsiCid || "") === String(cid));
+
+    const newCursorBlock = match ? Number(match.blockNumber) : latestBlock;
+    await ChainIndex.updateOne(
+      { key: "verify" },
+      { $set: { lastScannedBlock: newCursorBlock } },
+      { upsert: true },
+    );
+
     if (!match) return null;
     let timestamp = null;
     try {
@@ -73,7 +110,9 @@ export async function verifyOnChain(cid, deps = {}) {
     }
     return { txHash: match.transactionHash, blockNumber: match.blockNumber, timestamp };
   } catch (err) {
-    console.warn(`[chain] verify lookup failed (${err.message}) — falling back to DB`);
+    logger.warn("verify lookup failed — falling back to DB", {
+      message: err?.message || String(err),
+    });
     return null;
   }
 }

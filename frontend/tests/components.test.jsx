@@ -6,6 +6,8 @@ import { AuthProvider } from "../src/context/AuthContext.jsx";
 import TopBar from "../src/components/TopBar.jsx";
 import DashboardPage from "../src/pages/DashboardPage.jsx";
 import UploadModal from "../src/components/UploadModal.jsx";
+import AssessmentPage from "../src/pages/AssessmentPage.jsx";
+import MapView from "../src/components/MapView.jsx";
 
 vi.mock("react-leaflet", () => ({
   MapContainer: ({ children }) => <div>{children}</div>,
@@ -22,6 +24,8 @@ vi.mock("../src/lib/api.js", () => ({
     if (token) localStorage.setItem("rubicon_token", token);
     else localStorage.removeItem("rubicon_token");
   },
+  initAuth: vi.fn(async () => null),
+  refreshAuth: vi.fn(async () => null),
 }));
 
 import { api } from "../src/lib/api.js";
@@ -70,7 +74,7 @@ describe("TopBar", () => {
 
     expect(screen.getByText("user@example.com")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Logout"));
-    expect(localStorage.getItem("rubicon_user")).toBeNull();
+    await waitFor(() => expect(localStorage.getItem("rubicon_user")).toBeNull());
     await screen.findByText("login-route");
   });
 });
@@ -194,5 +198,65 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("Moderate")).toBeInTheDocument();
     await flush();
     expect(screen.queryByText("Load more")).not.toBeInTheDocument();
+  });
+});
+
+describe("AssessmentPage", () => {
+  it("shows a 404 with a back link when the assessment is missing", async () => {
+    api.mockRejectedValue(Object.assign(new Error("Not Found"), { status: 404 }));
+    render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={["/assessments/nope"]}>
+          <Routes>
+            <Route path="/assessments/:id" element={<AssessmentPage />} />
+            <Route path="/" element={<div>dashboard-route</div>} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
+    );
+
+    expect(await screen.findByText("404")).toBeInTheDocument();
+    expect(screen.getByText("Assessment not found.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Back to dashboard"));
+    expect(await screen.findByText("dashboard-route")).toBeInTheDocument();
+  });
+
+  it("renders the assessment data panel for a known assessment", async () => {
+    api.mockResolvedValue(asst({ id: "a1", txHash: "0xabc123tx", chainVerified: true }));
+    render(
+      <AuthProvider>
+        <MemoryRouter initialEntries={["/assessments/a1"]}>
+          <Routes>
+            <Route path="/assessments/:id" element={<AssessmentPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
+    );
+
+    expect((await screen.findAllByText(/Moderate/i)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Confidence/i).length).toBeGreaterThan(0);
+  });
+});
+
+describe("MapView", () => {
+  it("links polygon popups to the Polygon Amoy explorer when a tx hash exists", () => {
+    const polygon = asst({ id: "a1", txHash: "0xabc123tx" });
+    render(
+      <MemoryRouter>
+        <MapView polygons={[polygon]} />
+      </MemoryRouter>
+    );
+
+    const link = document.querySelector('a[href="https://amoy.polygonscan.com/tx/0xabc123tx"]');
+    expect(link).not.toBeNull();
+  });
+
+  it("shows an empty state when there are no assessments", () => {
+    render(
+      <MemoryRouter>
+        <MapView polygons={[]} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("No assessments mapped yet")).toBeInTheDocument();
   });
 });

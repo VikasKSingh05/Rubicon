@@ -13,6 +13,7 @@ globalThis.localStorage = {
 describe("api client", () => {
   beforeEach(() => {
     localStorage.clear();
+    setToken(null);
     vi.restoreAllMocks();
   });
 

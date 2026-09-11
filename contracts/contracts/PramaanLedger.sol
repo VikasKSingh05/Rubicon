@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 // Rubicon — Pramaan Ledger
-// Placeholder copied in during Phase 0 (contracts-first). Wired and deployed to the
-// Polygon Amoy testnet (chain ID 80002) in Phase 5.
+// Immutable record of assessment evidence (HSI/LiDAR CIDs + prediction). Deployed
+// to the Polygon Amoy testnet (chain ID 80002); verified via AssessmentLogged events.
 //
 // Customization notes (see Appendix C):
 // - Add onlyOwner/role-based access if only the backend's wallet should be able to write.

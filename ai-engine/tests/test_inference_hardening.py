@@ -1,4 +1,4 @@
-"""Hardening tests: oversized uploads and corrupt-artifact degradation."""
+"""Hardening tests: oversized uploads, corrupt-artifact degradation, magic bytes."""
 import pickle
 from pathlib import Path
 
@@ -9,6 +9,14 @@ import src.inference as inference
 from src.inference import app
 
 client = TestClient(app)
+
+
+def _valid_tiff() -> bytes:
+    return b"II*\x00" + b"\x00" * 8
+
+
+def _valid_laz() -> bytes:
+    return b"LASF" + b"\x00" * 8
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +40,29 @@ def test_oversized_upload_is_rejected(monkeypatch):
     assert res.json() == {"error": "hsi too large"}
 
 
+def test_garbage_bytes_return_400(monkeypatch):
+    res = client.post("/predict", files={"hsi": ("a.tif", b"this is not a tiff")})
+    assert res.status_code == 400
+    assert res.json()["error"] == "hsi file is not a valid TIFF"
+
+    res = client.post(
+        "/predict",
+        files={"hsi": ("a.tif", _valid_tiff()), "lidar": ("b.laz", b"not lasf")},
+    )
+    assert res.status_code == 400
+    assert res.json()["error"] == "lidar file is not a valid LAS/LAZ"
+
+
+def test_laz_lidar_is_accepted(monkeypatch):
+    res = client.post(
+        "/predict",
+        files={"hsi": ("a.tif", _valid_tiff()), "lidar": ("b.laz", _valid_laz())},
+    )
+    # Missing artifact + valid magic -> graceful stub (not a magic error).
+    assert res.status_code == 200
+    assert res.json()["model_version"] == "stub-v0"
+
+
 def test_corrupt_artifact_returns_clean_503(tmp_path, monkeypatch):
     model_dir = tmp_path / "corrupt"
     model_dir.mkdir()
@@ -42,7 +73,7 @@ def test_corrupt_artifact_returns_clean_503(tmp_path, monkeypatch):
     monkeypatch.setattr(inference, "_runtime_dir", None)
     monkeypatch.setattr(inference, "_runtime_error", None)
 
-    res = client.post("/predict", files={"hsi": ("a.tif", b"fake-hsi")})
+    res = client.post("/predict", files={"hsi": ("a.tif", _valid_tiff())})
     assert res.status_code == 503
     assert res.json() == {"error": "model unavailable"}
 
@@ -57,6 +88,6 @@ def test_missing_artifact_keeps_graceful_stub(tmp_path, monkeypatch):
     monkeypatch.setattr(inference, "_runtime_dir", None)
     monkeypatch.setattr(inference, "_runtime_error", None)
 
-    res = client.post("/predict", files={"hsi": ("a.tif", b"fake-hsi")})
+    res = client.post("/predict", files={"hsi": ("a.tif", _valid_tiff())})
     assert res.status_code == 200
     assert res.json()["model_version"] == "stub-v0"

@@ -73,8 +73,8 @@ export default function LoginPage() {
       </form>
 
       <p className="mt-4 text-center text-xs text-slate-400">
-        Demo build — tokens are stored in localStorage for simplicity (tradeoff noted
-        in the report).
+        Sign-in uses a short-lived access token (kept in memory) and a revocable
+        httpOnly refresh cookie — no bearer tokens are stored in localStorage.
       </p>
     </AuthCard>
   );

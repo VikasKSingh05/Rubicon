@@ -6,8 +6,9 @@ import DashboardPage from "./pages/DashboardPage.jsx";
 import AssessmentPage from "./pages/AssessmentPage.jsx";
 
 function RequireAuth({ children }) {
-  const { token } = useAuth();
+  const { token, ready } = useAuth();
   const location = useLocation();
+  if (!ready) return null;
   if (!token) return <Navigate to="/login" replace state={{ from: location }} />;
   return children;
 }

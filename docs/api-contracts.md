@@ -279,6 +279,7 @@ Stored by the backend in MongoDB. Shape (document):
 | `class_probs`  | object<string,number>      | Per-class probabilities.                                   |
 | `geojson_polygon` | GeoJSON Polygon        | Assessment polygon.                                        |
 | `model_version`| string                     | Model identifier.                                          |
+| `storage`      | object \| null             | `{ hsi: "<relative path>", lidar: "<relative path>" }` persisted originals (Phase 7). |
 | `hsiCid`       | string \| null             | IPFS CID of HSI file (Phase 5).                            |
 | `lidarCid`     | string \| null             | IPFS CID of LiDAR file (Phase 5).                          |
 | `txHash`       | string \| null             | Amoy transaction hash for the on-chain log (Phase 5).      |
@@ -292,6 +293,8 @@ Stored by the backend in MongoDB. Shape (document):
 
 ```
 uploaded ──► analyzing ──► analyzed ──► chain_pending ──► chain_logged
+                  │
+                  └────────────► error
 ```
 
 | State           | Phase of origin | Meaning                                          |
@@ -301,6 +304,7 @@ uploaded ──► analyzing ──► analyzed ──► chain_pending ──�
 | `analyzed`      | Phase 1         | Inference complete, result stored.               |
 | `chain_pending` | Phase 5         | IPFS pinning / on-chain tx submitted.            |
 | `chain_logged`  | Phase 5         | On-chain log confirmed (real txHash).            |
+| `error`         | Phase 7         | Upload pipeline failed after files were accepted (persistence, inference, or proof). |
 
 > Phase 5 runs the real proof pipeline for every upload: uploads are content-addressed
 > as IPFS CIDv0 values (pinned via Pinata when `PINATA_JWT` is set) and, when the Amoy
@@ -323,6 +327,39 @@ From the **Global Design System** — pairs icon + label with color (never color
 | Severe   | `#DC2626`  | ⚠          | Severe         |
 
 Verified-on-chain badge: `#0EA5E9` with a checkmark icon (visually prominent — core differentiator).
+
+---
+
+## 7. Auth (Phase 7 short-lived token + refresh cookie)
+
+Registration and login return the **same session shape** (the difference is only
+the HTTP status, `201` vs `200`):
+
+```json
+{
+  "token": "<short-lived JWT, held in browser memory only>",
+  "user": { "id": "66aa…", "email": "a@example.com" }
+}
+```
+
+The refresh token is **not** in the body. It is set as an `httpOnly;
+SameSite=Strict; Path=/auth` cookie named `rubicon_refresh` (7-day TTL,
+rotated on every use, revocable server-side; the DB stores only its sha-256).
+
+| Endpoint | Action |
+| --- | --- |
+| `POST /auth/register` `{ email, password }` | Creates the user; min password length **8**. `409` on duplicate email. |
+| `POST /auth/login` `{ email, password }` | Issues a session; `401` on bad credentials. |
+| `POST /auth/refresh` (cookie) | Rotates the refresh cookie and mints a fresh access token. Reused/revoked cookies → `401`. |
+| `POST /auth/logout` (cookie) | Revokes the refresh session and clears the cookie. |
+
+Protected routes take `Authorization: Bearer <accessToken>`. The frontend's API
+client replays a `401` once after refreshing; `/auth/*` paths are never replayed.
+Uploads additionally spool to disk and are magic-byte validated (TIFF `II*\0` /
+`MM\0*`, LAS `LASF`) before inference.
+
+Rate limits: `/auth` 10 req / 15 min / IP, `/upload` 20 req / 15 min / IP
+(return `429 { "error": "too many requests" }`).
 
 ---
 
