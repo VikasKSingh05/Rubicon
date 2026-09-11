@@ -13,7 +13,7 @@
     "user": { "type": "string", "description": "ObjectId of owning user" },
     "state": {
       "type": "string",
-      "enum": ["uploaded", "analyzing", "analyzed", "chain_pending", "chain_logged"]
+      "enum": ["uploaded", "analyzing", "analyzed", "chain_pending", "chain_logged", "error"]
     },
     "filename": {
       "type": "object",
@@ -22,6 +22,13 @@
         "lidar": { "type": "string" }
       },
       "required": ["hsi", "lidar"]
+    },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "hsi": { "type": ["string", "null"] },
+        "lidar": { "type": ["string", "null"] }
+      }
     },
     "prediction": { "type": "string" },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },

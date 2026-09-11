@@ -1,8 +1,6 @@
 import { useRef, useState } from "react";
 import { agentQuery } from "../lib/agent.js";
 
-// Phase 4 — tool-grounded agent chat. The agent answers only from backend tool
-// results; each reply shows the tools it checked (🔧 chips) via tool_calls.
 const SUGGESTIONS = [
   "Show severe zones from today",
   "Is the last upload verified on-chain?",
@@ -69,9 +67,7 @@ export default function AgentChatSlot({ assessmentId }) {
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2.5">
         <h3 className="text-sm font-semibold text-slate-700">
           Agent Assistant{" "}
-          <span className="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-            Phase 4
-          </span>
+
         </h3>
         <span className="flex items-center gap-1 text-[10px] text-slate-400">
           <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" />

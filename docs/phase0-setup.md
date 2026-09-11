@@ -24,9 +24,14 @@
 - [ ] Fund with faucet POL (~0.1 POL/day). Set this up **now**, not the week you deploy:
       - Alchemy Amoy faucet: https://faucet.alchemy.com (some faucets check mainnet activity)
 - [ ] Copy the wallet private key → `DEPLOYER_PRIVATE_KEY` in `.env` (**never commit**)
-- [ ] After Phase 5 deployment, set `CONTRACT_ADDRESS` in `.env`
+- [ ] After the first contract deploy, set `CONTRACT_ADDRESS` in `.env`
 
-## 4. LLM API key (configurable — see Phase 0 decision)
+> **Using docker compose?** The bundled `mongodb` container is the default
+> (`MONGO_URI` falls back to `mongodb://mongodb:27017/rubicon`). Setting
+> `MONGO_URI` in `.env` overrides it and points the backend at your Atlas
+> cluster instead.
+
+## 4. LLM API key (configurable)
 We support **three** providers behind `LLM_PROVIDER` (`anthropic` | `openai` | `openrouter`), or empty for the deterministic tool-grounded fallback agent.
 
 - **[ ] Anthropic** → https://console.anthropic.com → `ANTHROPIC_API_KEY`

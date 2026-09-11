@@ -1,4 +1,4 @@
-# Rubicon — Phase 6 Report
+# Rubicon — Phase 7 Report
 
 **Autonomous Multimodal Disaster Assessment with Immutable Proof System**
 
@@ -37,7 +37,7 @@ Agent-service (:8001) — tool-grounded chat (LLM or deterministic fallback)
 | **On-chain log**            | Real `logAssessment` tx on Amoy when RPC+key+contract configured                              | Deterministic fake txHash (`chainVerified:false`, state stays `analyzed`)             |
 | **On-chain verify**         | `AssessmentLogged` event lookup on `/chain/verify/:cid`                                       | DB-backed status                                                                    |
 | **Chat agent**              | Anthropic / OpenAI / OpenRouter tool-calling loop                                             | Deterministic tool-grounded fallback (answers strictly from backend data)            |
-| **Auth**                    | bcrypt(10), JWT 7d, per-user data scoping                                                     | —                                                                                    |
+| **Auth**                    | bcrypt(10); short-lived access JWT (default 15m, browser memory only) + rotating httpOnly refresh cookie (7d) | — |
 
 Every degradation is intentional and surfaced in the UI via `model_version`, `chainVerified`,
 and state.

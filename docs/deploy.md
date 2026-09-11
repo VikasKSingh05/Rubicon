@@ -25,14 +25,22 @@ uploaded artifacts live on named/`STORAGE_DIR` volumes.
 - Set `CORS_ORIGINS` to the exact origin(s) the browser will use (e.g. `https://rubicon.example.com`). There is **no wildcard** — requests from any other origin are rejected by the backend and agent-service.
 - Decide upload limits and storage: `MAX_UPLOAD_MB`, `STORAGE_DIR` (backend volume).
 
-## 2. Required secrets (no default in production)
+## 2. Required configuration (no default in production)
 
 | Variable | Purpose | Who needs it |
 | --- | --- | --- |
-| `JWT_SECRET` | signs access tokens | backend |
+| `JWT_SECRET` | signs access tokens (generate: `openssl rand -hex 32`) | backend |
+| `MONGO_URI` | database connection; `docker compose` uses `${MONGO_URI:-mongodb://mongodb:27017/rubicon}`, so set it to your Atlas/self-hosted URI to override the bundled container | backend |
+| `NODE_ENV` | `production` enforces secret checks on boot (backend refuses a missing/dev `JWT_SECRET`) | backend |
+| `CORS_ORIGINS` | comma-separated browser origin allowlist (no wildcard) | backend, agent-service |
+| `STORAGE_DIR` | where uploaded originals are persisted (volume for backups) | backend |
+| `MAX_UPLOAD_MB` / `ACCESS_TOKEN_TTL` / `RATE_LIMIT_DISABLED` | upload cap / access-token window / dev-only rate-limit toggle | backend |
 | `PINATA_JWT` | pins CIDs to IPFS (optional — CIDs are computed locally without it) | backend |
-| `AMOY_RPC_URL` / `DEPLOYER_PRIVATE_KEY` / `CONTRACT_ADDRESS` | Polygon Amoy on-chain proof | backend |
+| `AMOY_RPC_URL` / `DEPLOYER_PRIVATE_KEY` / `CONTRACT_ADDRESS` | Polygon Amoy on-chain proof | backend + `contracts/scripts/deploy.js` |
 | `LLM_PROVIDER` + its key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`) | conversational agent | agent-service |
+| `BACKEND_URL` | agent-service → backend base URL (`docker compose` sets `http://backend:4000`) | agent-service |
+| `RUBICON_MODEL_DIR` / `AI_ENGINE_MAX_MB` | model-artifact directory / max upload size for the engine | ai-engine |
+| `VITE_API_URL` / `VITE_AGENT_URL` | **build-time** browser→API/agent URLs (default `http://localhost:4000` / `:8001` baked into `dist` if unset) | frontend build |
 
 If `AMOY_RPC_URL`/key/contract are all unset the backend runs a deterministic
 **simulated** on-chain record (state stays `analyzed`). Set all three to write
@@ -56,6 +64,10 @@ docker compose ps          # all healthy
   that rotates on every use. Sessions are revocable server-side.
 - Rate limits on `/auth` (10/15min) and `/upload` (20/15min) are on by default;
   `RATE_LIMIT_DISABLED=1` is for development only.
+- Originals are downloadable owner-scoped via `GET /files/:id/:kind`
+  (path-traversal-safe; `404` for other users).
+- Users can rotate their own password via `POST /auth/change-password`; doing so
+  revokes every other refresh session.
 
 ## 4. TLS / reverse proxy
 
@@ -121,3 +133,6 @@ These require an external account/wallet and are intentionally not automated:
 2. Deploy the ledger to Amoy: `cd contracts && npm install && npm run deploy`
    with a funded testnet wallet; put the printed address in `CONTRACT_ADDRESS`.
 3. Set `LLM_PROVIDER` to your provider and its key.
+4. If serving from non-localhost origins, set `MONGO_URI`, `CORS_ORIGINS`, and
+   rebuild the frontend with `VITE_API_URL`/`VITE_AGENT_URL` pointing at the
+   public API (unset → `localhost` is baked into `dist`).

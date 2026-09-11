@@ -53,7 +53,7 @@ services:
     container_name: rubicon-backend
     environment:
       - BACKEND_PORT=4000
-      - MONGO_URI=mongodb://mongodb:27017/rubicon
+      - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/rubicon}
       - AI_ENGINE_URL=http://ai-engine:8000
       - NODE_ENV=${NODE_ENV:-development}
       - JWT_SECRET=${JWT_SECRET}
@@ -83,7 +83,11 @@ services:
       retries: 5
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
+        VITE_AGENT_URL: ${VITE_AGENT_URL:-http://localhost:8001}
     container_name: rubicon-frontend
     environment:
       - FRONTEND_PORT=3000

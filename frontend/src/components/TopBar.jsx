@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { severityOf } from "../lib/severity.js";
 import { useAuth } from "../context/AuthContext.jsx";
+import ChangePasswordModal from "./ChangePasswordModal.jsx";
 
 function formatTime(iso) {
   try {
@@ -14,7 +15,9 @@ function formatTime(iso) {
 export default function TopBar({ onUpload, onRefresh, refreshing }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const [changeOpen, setChangeOpen] = useState(false);
   return (
+    <>
     <header className="flex h-14 items-center justify-between border-b border-primary/20 bg-primary px-4 text-white">
       <button
         onClick={() => navigate("/")}
@@ -47,6 +50,12 @@ export default function TopBar({ onUpload, onRefresh, refreshing }) {
           + Upload New Scan
         </button>
         <button
+          onClick={() => setChangeOpen(true)}
+          className="rounded-md px-2 py-1 text-xs text-white/80 transition-colors hover:bg-white/10"
+        >
+          Password
+        </button>
+        <button
           onClick={() => {
             logout();
             navigate("/login");
@@ -57,6 +66,8 @@ export default function TopBar({ onUpload, onRefresh, refreshing }) {
         </button>
       </div>
     </header>
+    {changeOpen && <ChangePasswordModal onClose={() => setChangeOpen(false)} />}
+    </>
   );
 }
 

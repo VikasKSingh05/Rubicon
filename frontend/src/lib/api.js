@@ -78,6 +78,13 @@ export async function initAuth() {
   return refreshAuth();
 }
 
+export async function changePassword(currentPassword, newPassword) {
+  return api("/auth/change-password", {
+    method: "POST",
+    body: { currentPassword, newPassword },
+  });
+}
+
 export { API_BASE };
 
 /** Fetch a file download (e.g. /files/:id/hsi) and return a Blob URL. */

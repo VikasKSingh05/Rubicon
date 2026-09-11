@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "../src/context/AuthContext.jsx";
 import TopBar from "../src/components/TopBar.jsx";
+import ChangePasswordModal from "../src/components/ChangePasswordModal.jsx";
 import DashboardPage from "../src/pages/DashboardPage.jsx";
 import UploadModal from "../src/components/UploadModal.jsx";
 import AssessmentPage from "../src/pages/AssessmentPage.jsx";
@@ -32,6 +33,7 @@ vi.mock("../src/lib/api.js", () => ({
   initAuth: vi.fn(async () => null),
   refreshAuth: vi.fn(async () => null),
   downloadBlob: vi.fn(),
+  changePassword: vi.fn(),
 }));
 
 import { api } from "../src/lib/api.js";
@@ -338,6 +340,50 @@ describe("AgentChatSlot", () => {
 
     expect(await screen.findByText("Recovered answer.")).toBeInTheDocument();
     expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
+});
+
+describe("ChangePasswordModal", () => {
+  it("calls changePassword on successful submit and shows success", async () => {
+    const { changePassword } = await import("../src/lib/api.js");
+    changePassword.mockResolvedValue({ ok: true });
+    const onClose = vi.fn();
+
+    render(<ChangePasswordModal onClose={onClose} />);
+
+    fireEvent.change(screen.getByLabelText("Current password"), {
+      target: { value: "oldpass123" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), {
+      target: { value: "newpass123" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
+      target: { value: "newpass123" },
+    });
+
+    fireEvent.click(screen.getByText("Change password"));
+
+    expect(await screen.findByText(/^Password changed\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Done"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an error when new passwords do not match", async () => {
+    render(<ChangePasswordModal onClose={() => {}} />);
+
+    fireEvent.change(screen.getByLabelText("Current password"), {
+      target: { value: "oldpass123" },
+    });
+    fireEvent.change(screen.getByLabelText("New password"), {
+      target: { value: "newpass123" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
+      target: { value: "different1" },
+    });
+
+    fireEvent.click(screen.getByText("Change password"));
+
+    expect(await screen.findByText("Passwords do not match")).toBeInTheDocument();
   });
 });
 

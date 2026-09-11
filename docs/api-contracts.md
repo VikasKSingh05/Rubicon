@@ -11,10 +11,13 @@
 
 1. [AI engine `POST /predict` response](#1-ai-engine-post-predict-response)
 2. [Backend `POST /upload` response](#2-backend-post-upload-response)
-3. [Agent `POST /agent/query` response](#3-agent-post-agentquery-response)
-4. [MongoDB `Assessment` schema](#4-mongodb-assessment-schema)
-5. [Assessment state machine](#5-assessment-state-machine)
-6. [Severity color mapping](#6-severity-color-mapping)
+3. [Backend `GET /assessments` (list)](#3-backend-get-assessments-list)
+4. [Backend `GET /assessments/:id` (detail)](#4-backend-get-assessmentsid-detail)
+5. [Agent `POST /agent/query` response](#5-agent-post-agentquery-response)
+6. [MongoDB `Assessment` schema](#6-mongodb-assessment-schema)
+7. [Assessment state machine](#7-assessment-state-machine)
+8. [Severity color mapping](#8-severity-color-mapping)
+9. [Auth, file downloads, and ops endpoints](#9-auth-file-downloads-and-ops-endpoints)
 
 ---
 
@@ -24,7 +27,7 @@
 internally; the **frontend never talks to the AI engine directly** — it only ever receives an
 assessment via the backend.
 
-**Request body** (multipart `form-data`; Phase 6 sends the real uploaded buffers):
+**Request body** (multipart `form-data`; the backend forwards the exact uploaded buffers):
 
 ```json
 {
@@ -70,12 +73,12 @@ frontend changes, because the response shape never changes.
 
 ## 2. Backend `POST /upload` response
 
-The backend accepts an uploaded scan (hyperspectral + LiDAR, `accept .tiff/.las`) at
-**`POST /upload`** and returns the created assessment.
+The backend accepts an uploaded scan (hyperspectral + LiDAR, extensions
+`.tif/.tiff/.las/.laz`) at **`POST /upload`** and returns the created assessment.
 
 **Request:** `multipart/form-data` with fields `hsi` and `lidar` (files).
 
-**Response `200 OK`** — exact shape:
+**Response `201 Created`** — exact shape:
 
 ```json
 {
@@ -102,13 +105,13 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, `accept .tiff/.las`
 
 > The analysis step is **real**: the backend forwards the uploaded files to `POST /predict`
 > and stores the engine's response. `state` is `analyzed` (or `chain_logged` when the Amoy
-> proof layer is configured — see §5). If the engine is unreachable the backend degrades to
+> proof layer is configured — see §7). If the engine is unreachable the backend degrades to
 > the contract-identical stub (`model_version: "stub-v0"`).
 
 | Field      | Type                        | Notes                                        |
 | ---------- | --------------------------- | -------------------------------------------- |
 | `assessmentId` | string (ObjectId hex)  | Stored assessment identifier.                |
-| `state`    | enum (see §5)               | `uploaded` \| `analyzing` \| `analyzed` \| … |
+| `state`    | enum (see §7)               | `uploaded` \| `analyzing` \| `analyzed` \| … |
 | `prediction` | string                   | Damage class label.                          |
 | `confidence` | number (0–1)             | Model confidence.                            |
 | `class_probs` | object<string,number>  | Per-class probabilities.                     |
@@ -119,7 +122,7 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, `accept .tiff/.las`
 
 ---
 
-## 2-b. Backend `GET /assessments` (list)
+## 3. Backend `GET /assessments` (list)
 
 Returns the caller's assessments, newest first. Paginated with `?limit=` (default 50, max 200)
 and `?offset=` (default 0).
@@ -155,12 +158,50 @@ and `?offset=` (default 0).
 | `limit`       | number            | Echo of the applied limit.                        |
 | `offset`      | number            | Echo of the applied offset.                       |
 
-`severity` uses the lowercase enum `none | moderate | severe` (see §6). `txHash`/`chainVerified`
+`severity` uses the lowercase enum `none | moderate | severe` (see §8). `txHash`/`chainVerified`
 power the map-popup chain affordance (null/empty when the proof layer was simulated).
 
 ---
 
-## 3. Agent `POST /agent/query` response
+## 4. Backend `GET /assessments/:id` (detail)
+
+Full record for one assessment (`POST /upload` links to it via `links.detail`). Returns the
+stored document serialized to JSON: everything in the list shape **plus** `user`,
+`filename`, `storage`, `class_probs`, `model_version`, `hsiCid`/`lidarCid`, `timestamps`,
+and the `severity` virtual.
+
+**Response `200 OK`:**
+
+```json
+{
+  "id": "665d8f3e2f3a4b5c6d7e8f90",
+  "user": "66aa…",
+  "state": "analyzed",
+  "prediction": "Severe Collapse",
+  "confidence": 0.91,
+  "class_probs": { "None": 0.02, "Moderate": 0.07, "Severe Collapse": 0.91 },
+  "geojson_polygon": { "type": "Polygon", "coordinates": [] },
+  "model_version": "stub-v0",
+  "severity": "severe",
+  "filename": { "hsi": "scan.tiff", "lidar": "scan.laz" },
+  "storage": { "hsi": "<assessmentId>/hsi.tiff", "lidar": "<assessmentId>/lidar.laz" },
+  "hsiCid": "Qm…",
+  "lidarCid": "Qm…",
+  "txHash": null,
+  "chainVerified": false,
+  "timestamps": { "uploaded": "2026-09-07T12:00:00.000Z", "analyzed": "2026-09-07T12:00:05.000Z" },
+  "createdAt": "2026-09-07T12:00:00.000Z",
+  "updatedAt": "2026-09-07T12:00:05.000Z"
+}
+```
+
+`storage.hsi`/`storage.lidar` (relative paths under the backend's `STORAGE_DIR`) power the
+`GET /files/:id/:kind` download endpoints (see §9). `401` without a bearer token; `404` for a
+missing assessment or one owned by a different user.
+
+---
+
+## 5. Agent `POST /agent/query` response
 
 `agent-service` exposes **`POST /agent/query`** for the chat panel. The agent is
 **tool-grounded** — it answers only from tool results, never from the LLM's internal knowledge.
@@ -214,20 +255,20 @@ power the map-popup chain affordance (null/empty when the proof layer was simula
 data, it says so (e.g. `"I don't have data for that zone."`) rather than guessing. This is a
 **demo-grade, tool-grounded agent**, not a certified emergency system.
 
-**Defined tools (Phase 4):**
+**Defined tools:**
 
 - `get_recent_assessments(severity_filter, limit)` → queries backend Mongo-backed API.
 - `get_assessment(id)` → full record for one assessment (confidence, probs, chain fields).
 - `get_chain_status(cid)` → calls backend `/chain/verify/:cid` (on-chain event lookup when the Amoy layer is configured; DB-backed otherwise).
 - `summarize_zone(geojson)` → stats summary (area, class, confidence).
 
-The agent may run the tools through an LLM tool-calling loop (Anthropic or OpenAI, see
-`LLM_PROVIDER`) or, when no key is set, through a deterministic fallback agent. Both paths
-obey the same grounding rule above.
+The agent may run the tools through an LLM tool-calling loop (Anthropic, OpenAI, or
+OpenRouter, selected by `LLM_PROVIDER`) or, when no key is set, through a deterministic
+fallback agent. Both paths obey the same grounding rule above.
 
 ---
 
-## 4. MongoDB `Assessment` schema
+## 6. MongoDB `Assessment` schema
 
 Stored by the backend in MongoDB. Shape (document):
 
@@ -272,7 +313,7 @@ Stored by the backend in MongoDB. Shape (document):
 | -------------- | -------------------------- | ---------------------------------------------------------- |
 | `_id`          | ObjectId                   | Primary key.                                               |
 | `user`         | ObjectId                   | Owning user (from JWT).                                    |
-| `state`        | enum (see §5)              | Current assessment state.                                  |
+| `state`        | enum (see §7)              | Current assessment state.                                  |
 | `filename`     | object `{hsi, lidar}`      | Original uploaded filenames.                               |
 | `prediction`   | string                     | Damage class label.                                        |
 | `confidence`   | number (0–1)               | Model confidence.                                          |
@@ -289,7 +330,7 @@ Stored by the backend in MongoDB. Shape (document):
 
 ---
 
-## 5. Assessment state machine
+## 7. Assessment state machine
 
 ```
 uploaded ──► analyzing ──► analyzed ──► chain_pending ──► chain_logged
@@ -316,7 +357,7 @@ uploaded ──► analyzing ──► analyzed ──► chain_pending ──�
 
 ---
 
-## 6. Severity color mapping
+## 8. Severity color mapping
 
 From the **Global Design System** — pairs icon + label with color (never color alone).
 
@@ -330,7 +371,7 @@ Verified-on-chain badge: `#0EA5E9` with a checkmark icon (visually prominent —
 
 ---
 
-## 7. Auth (Phase 7 short-lived token + refresh cookie)
+## 9. Auth, file downloads, and ops endpoints
 
 Registration and login return the **same session shape** (the difference is only
 the HTTP status, `201` vs `200`):
@@ -365,6 +406,36 @@ Uploads additionally spool to disk and are magic-byte validated (TIFF `II*\0` /
 
 Rate limits: `/auth` 10 req / 15 min / IP, `/upload` 20 req / 15 min / IP
 (return `429 { "error": "too many requests" }`).
+
+### Chain verification
+
+**`GET /chain/verify/:cid`** (bearer-authenticated) — on-chain proof status for a content
+address. When the Amoy layer is configured it scans `AssessmentLogged` events starting from
+the persisted `ChainIndex` cursor; otherwise it answers from the database.
+
+**Response `200 OK`:**
+
+```json
+{
+  "cid": "Qm123…",
+  "verified": false,
+  "txHash": null,
+  "assessmentId": null,
+  "state": null
+}
+```
+
+`verified: true` with a real `txHash` when the CIDs were logged on-chain; for a simulated
+proof the record still resolves to the stored assessment (`assessmentId`/`state` populated)
+with `verified: false`.
+
+### Ops endpoints
+
+| Endpoint | Service | Notes |
+| --- | --- | --- |
+| `GET /health` | backend, ai-engine, agent-service, frontend | Liveness + readiness (backend reports Mongo state; ai-engine reports `model_loaded`). |
+| `GET /metrics` | backend | Prometheus text: `rubicon_uploads_total`, `rubicon_proofs_total`, `rubicon_errors_total`, `process_uptime_seconds`. |
+| `GET /tools` | agent-service | Lists the tool-grounded agent's available tools. |
 
 ---
 
