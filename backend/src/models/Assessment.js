@@ -6,6 +6,7 @@ export const ASSESSMENT_STATES = [
   "analyzed",
   "chain_pending",
   "chain_logged",
+  "error",
 ];
 
 export const SEVERITY_BY_PREDICTION = {
@@ -19,6 +20,10 @@ const assessmentSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     state: { type: String, enum: ASSESSMENT_STATES, default: "uploaded" },
     filename: {
+      hsi: { type: String, default: null },
+      lidar: { type: String, default: null },
+    },
+    storage: {
       hsi: { type: String, default: null },
       lidar: { type: String, default: null },
     },

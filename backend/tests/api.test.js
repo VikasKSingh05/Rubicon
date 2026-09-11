@@ -9,6 +9,10 @@ import { config } from "../src/config.js";
 import { contentCid } from "../src/services/ipfs.js";
 import Assessment from "../src/models/Assessment.js";
 
+// Phase 7 rate limiting is exercised in auth-hardening.test.js against a fresh
+// app; the main suite keeps it off so the shared app instance never 429s.
+config.rateLimitEnabled = false;
+
 const app = createApp();
 let mongo;
 
@@ -99,12 +103,16 @@ function authHeader(token) {
   return { Authorization: `Bearer ${token}` };
 }
 
+// Magic-valid upload payloads (Phase 7 validates content, not just extension).
+const FAKE_HSI = Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), Buffer.from("fake-hsi")]);
+const FAKE_LIDAR = Buffer.concat([Buffer.from("LASF"), Buffer.from("fake-lidar")]);
+
 async function uploadFiles(token, hsiName = "scan.tiff", lidarName = "scan.las") {
   return request(app)
     .post("/upload")
     .set(authHeader(token))
-    .attach("hsi", Buffer.from("fake-hsi"), hsiName)
-    .attach("lidar", Buffer.from("fake-lidar"), lidarName);
+    .attach("hsi", FAKE_HSI, hsiName)
+    .attach("lidar", FAKE_LIDAR, lidarName);
 }
 
 test("upload requires auth", async () => {
@@ -195,8 +203,8 @@ test("upload content-addresses files as real CIDv0 and reports simulated chain s
   assert.equal(res.status, 201);
 
   const detail = await request(app).get(res.body.links.detail).set(authHeader(token));
-  assert.equal(detail.body.hsiCid, contentCid(Buffer.from("fake-hsi")));
-  assert.equal(detail.body.lidarCid, contentCid(Buffer.from("fake-lidar")));
+  assert.equal(detail.body.hsiCid, contentCid(FAKE_HSI));
+  assert.equal(detail.body.lidarCid, contentCid(FAKE_LIDAR));
   // Offline proof: a deterministic fake tx, chain not yet verified.
   assert.equal(detail.body.chainVerified, false);
   assert.ok(detail.body.txHash.startsWith("0x"));
@@ -262,10 +270,21 @@ test("upload accepts .laz LiDAR alongside .tiff HSI", async () => {
   const res = await request(app)
     .post("/upload")
     .set(authHeader(token))
-    .attach("hsi", Buffer.from("fake-hsi"), "scans.tiff")
-    .attach("lidar", Buffer.from("fake-lidar"), "scans.laz");
+    .attach("hsi", FAKE_HSI, "scans.tiff")
+    .attach("lidar", FAKE_LIDAR, "scans.laz");
   assert.equal(res.status, 201);
   assert.equal(res.body.model_version, "stub-v0");
+});
+
+test("upload rejects files whose content does not match the extension", async () => {
+  const token = await getToken();
+  const res = await request(app)
+    .post("/upload")
+    .set(authHeader(token))
+    .attach("hsi", Buffer.from("garbage bytes not a tiff"), "scan.tiff")
+    .attach("lidar", FAKE_LIDAR, "scan.las");
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, "hsi file is not a valid TIFF");
 });
 
 test("assessment detail is scoped to the owning user", async () => {

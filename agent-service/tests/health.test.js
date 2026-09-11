@@ -28,11 +28,21 @@ test("CORS preflight is answered for the cross-origin chat panel", async () => {
     .set("access-control-request-method", "POST")
     .set("access-control-request-headers", "content-type");
   assert.equal(res.status, 204);
-  assert.equal(res.headers["access-control-allow-origin"], "*");
+  // Restricted CORS: an allowed origin is reflected (never a wildcard).
+  assert.equal(res.headers["access-control-allow-origin"], "http://localhost:3000");
   assert.ok(
     (res.headers["access-control-allow-methods"] || "").includes("POST"),
     "expected POST in allow-methods",
   );
+});
+
+test("CORS blocks origins not in the allowlist", async () => {
+  const res = await request(app)
+    .options("/agent/query")
+    .set("origin", "https://evil.example")
+    .set("access-control-request-method", "POST");
+  assert.equal(res.status, 204);
+  assert.equal(res.headers["access-control-allow-origin"], undefined);
 });
 
 test("POST /agent/query requires a query", async () => {

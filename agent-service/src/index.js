@@ -1,16 +1,24 @@
 import { pathToFileURL } from "node:url";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 
 import { config, llmConfigured } from "./config.js";
 import { runAgent } from "./providers.js";
 import { runFallbackAgent } from "./fallback.js";
 import { manifest } from "./tools.js";
+import { makeLogger, requestId, requestLogger } from "./logger.js";
+
+const logger = makeLogger("agent-service");
 
 const PORT = config.port;
 const app = express();
 
-app.use(cors());
+app.disable("x-powered-by");
+app.use(requestId);
+app.use(requestLogger(logger));
+app.use(helmet());
+app.use(cors({ origin: (process.env.CORS_ORIGINS || "http://localhost:3000").split(",").map((s) => s.trim()).filter(Boolean) }));
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
@@ -44,21 +52,45 @@ app.post("/agent/query", async (req, res) => {
     backendUrl: config.backendUrl,
   };
 
+  const started = Date.now();
   try {
     const { answer, toolCalls } = await runAgent(opts);
+    logger.info("query answered by LLM", {
+      requestId: req.requestId,
+      durationMs: Date.now() - started,
+      toolCalls: toolCalls.length,
+    });
     return res.json({ answer, tool_calls: toolCalls, createdAt: new Date().toISOString() });
   } catch (err) {
-    console.warn(`[agent] LLM unavailable, using fallback agent: ${err.message}`);
+    logger.warn("LLM unavailable, using fallback agent", {
+      requestId: req.requestId,
+      message: err.message,
+    });
   }
 
   const fallback = await runFallbackAgent(opts);
+  logger.info("query answered by fallback agent", {
+    requestId: req.requestId,
+    durationMs: Date.now() - started,
+    toolCalls: fallback.toolCalls.length,
+  });
   return res.json({ answer: fallback.answer, tool_calls: fallback.toolCalls, createdAt: new Date().toISOString() });
+});
+
+app.use((_req, res) => {
+  res.status(404).json({ error: "not found" });
+});
+
+app.use((err, _req, res, next) => {
+  if (res.headersSent) return next(err);
+  logger.error("unhandled error", { message: err?.message || String(err) });
+  return res.status(500).json({ error: "internal server error" });
 });
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   app.listen(PORT, () => {
-    console.log(`[agent-service] listening on port ${PORT}`);
+    logger.info("listening", { port: PORT });
   });
 }
 

@@ -104,3 +104,103 @@ test("openrouter falls back to OPENAI_API_KEY when its own key is missing", asyn
     globalThis.fetch = originalFetch;
   }
 });
+
+test("anthropic tool-calling loop answers from tool results", async () => {
+  const { config } = await import("../src/config.js");
+  const previousProvider = config.llm.provider;
+  config.llm.provider = "anthropic";
+  process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+
+  let calls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (!url.startsWith("https://api.anthropic.com")) {
+      return { ok: true, json: async () => ({}) }; // backend tool URL
+    }
+    calls += 1;
+    const first = calls === 1;
+    return {
+      ok: true,
+      json: async () => ({
+        content: first
+          ? [
+              {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "get_assessment",
+                input: { assessmentId: "a01" },
+              },
+            ]
+          : [{ type: "text", text: "Zone a01 was assessed: Severe Collapse (91%)." }],
+      }),
+    };
+  };
+
+  try {
+    const { runAgent } = await import("../src/providers.js");
+    const res = await runAgent({
+      query: "how was zone a01 assessed?",
+      token: null,
+      backendUrl: "http://agent-backend.local",
+    });
+    assert.match(res.answer, /Severe Collapse/);
+    assert.equal(res.toolCalls.length, 1);
+    assert.equal(res.toolCalls[0].tool, "get_assessment");
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.ANTHROPIC_API_KEY;
+    config.llm.provider = previousProvider;
+  }
+});
+
+test("tool-calling loop stops after the iteration limit instead of spinning", async () => {
+  const { config } = await import("../src/config.js");
+  const previousProvider = config.llm.provider;
+  config.llm.provider = "openai";
+  process.env.OPENAI_API_KEY = "sk-openai-test";
+
+  let calls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (!url.startsWith("https://api.openai.com")) {
+      return { ok: true, json: async () => ({}) }; // backend tool URL
+    }
+    calls += 1;
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [
+          // The model always requests a tool, never producing text.
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_n",
+                  type: "function",
+                  function: { name: "get_recent_assessments", arguments: "{}" },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    };
+  };
+
+  try {
+    const { ITERATION_LIMIT, runAgent } = await import("../src/providers.js");
+    const res = await runAgent({
+      query: "keep looping please",
+      token: null,
+      backendUrl: "http://agent-backend.local",
+    });
+    assert.equal(calls, ITERATION_LIMIT, "provider calls must be capped");
+    assert.equal(res.toolCalls.length, ITERATION_LIMIT);
+    assert.match(res.answer, /I don't have an answer from my tools yet/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.OPENAI_API_KEY;
+    config.llm.provider = previousProvider;
+  }
+});

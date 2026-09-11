@@ -1,4 +1,7 @@
 import { config } from "../config.js";
+import { makeLogger } from "../middleware/logger.js";
+
+const logger = makeLogger("aiService");
 
 const CLASSES = ["None", "Moderate", "Severe Collapse"];
 const STUB_MODEL_VERSION = "stub-v0";
@@ -52,7 +55,7 @@ function stubPredict() {
 // uploaded buffers as multipart; on any transport/parse failure we fall back to
 // the contract-identical randomized stub so uploads never hard-fail. The stub is
 // distinguishable via model_version "stub-v0".
-export async function runInference(files = {}) {
+export async function runInference(files = {}, { requestId } = {}) {
   try {
     const form = new FormData();
     if (files?.hsi?.buffer) {
@@ -68,14 +71,17 @@ export async function runInference(files = {}) {
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) {
-      console.warn(`[aiService] engine responded ${res.status} — using stub`);
+      logger.warn("engine non-2xx, using stub", { requestId, status: res.status });
       return stubPredict();
     }
     const body = await res.json();
     if (body && body.prediction && body.geojson_polygon) return body;
-    console.warn("[aiService] unexpected /predict payload — using stub");
+    logger.warn("unexpected /predict payload, using stub", { requestId });
   } catch (err) {
-    console.warn(`[aiService] engine unreachable (${err?.message}) — using stub`);
+    logger.warn("engine unreachable, using stub", {
+      requestId,
+      message: err?.message || String(err),
+    });
   }
   return stubPredict();
 }

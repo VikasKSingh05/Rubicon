@@ -10,16 +10,45 @@ docs/api-contracts.md). Behavior:
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
 import tempfile
+import time
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
+from starlette.requests import Request
 
 from src.model.serving import predict_files, load_runtime
 
 app = FastAPI(title="Rubicon AI Engine", version="1.0.0")
+
+engine_logger = logging.getLogger("rubicon.engine")
+
+
+@app.middleware("http")
+async def _access_log(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    dur_ms = round((time.perf_counter() - start) * 1000, 2)
+    engine_logger.info(
+        json.dumps(
+            {
+                "level": "info",
+                "service": "ai-engine",
+                "msg": "http",
+                "requestId": request.headers.get("x-request-id") or str(uuid.uuid4()),
+                "method": request.method,
+                "path": request.url.path,
+                "status": response.status_code,
+                "durationMs": dur_ms,
+            }
+        )
+    )
+    return response
 
 STUB = {
     "prediction": "Severe Collapse",
@@ -103,6 +132,20 @@ def _save_upload(data: bytes, filename: str) -> str:
     return path
 
 
+def _validate_magic(filename: str, kind: str, data: bytes) -> str | None:
+    """Reject files whose magic bytes don't match their extension. Added in
+    Phase 7 so malformed bytes fail fast at 400 instead of hitting rasterio."""
+    ext = Path(filename or "").suffix.lower()
+    if ext in (".tif", ".tiff"):
+        ok = data[:4] in (b"II*\x00", b"MM\x00*")
+        if not ok:
+            return "hsi file is not a valid TIFF" if kind == "hsi" else "lidar file is not a valid TIFF"
+        return None
+    if not data.startswith(b"LASF"):
+        return "lidar file is not a valid LAS/LAZ"
+    return None
+
+
 @app.post("/predict")
 def predict(hsi: UploadFile | None = File(None), lidar: UploadFile | None = File(None)):
     """Run the fusion model on an uploaded scene, or return the stub."""
@@ -121,6 +164,14 @@ def predict(hsi: UploadFile | None = File(None), lidar: UploadFile | None = File
     lidar_data = _read_limited(lidar) if lidar else None
     if lidar and lidar_data is None:
         return JSONResponse(status_code=413, content={"error": "lidar too large"})
+
+    magic_error = _validate_magic(hsi.filename or "", "hsi", hsi_data)
+    if magic_error:
+        return JSONResponse(status_code=400, content={"error": magic_error})
+    if lidar:
+        magic_error = _validate_magic(lidar.filename or "", "lidar", lidar_data)
+        if magic_error:
+            return JSONResponse(status_code=400, content={"error": magic_error})
 
     runtime = get_runtime()
     if runtime is None:

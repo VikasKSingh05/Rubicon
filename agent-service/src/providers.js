@@ -5,8 +5,8 @@
 import { config, llmConfigured } from "./config.js";
 import { execTool, manifest } from "./tools.js";
 
-const ITERATION_LIMIT = 5;
-const TIMEOUT_MS = 20_000;
+export const ITERATION_LIMIT = 5;
+export const TIMEOUT_MS = 20_000;
 const SYSTEM_PROMPT = [
   "You are the Rubicon disaster-assessment assistant.",
   "You answer ONLY from the results of the provided tools — never from your own knowledge.",

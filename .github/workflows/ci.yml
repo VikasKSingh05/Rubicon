@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       mongodb:
-        image: mongo:7
+        image: mongo:7.0.14
         ports:
           - 27017:27017
     steps:
@@ -104,3 +104,11 @@ jobs:
       - name: Test ai-engine
         working-directory: ai-engine
         run: python -m pytest
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify all services build via docker compose
+        run: docker compose build --parallel --progress=plain

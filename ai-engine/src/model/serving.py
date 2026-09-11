@@ -27,20 +27,52 @@ HOUSTON_POLYGON = {
 }
 
 
-def load_runtime(model_dir):
-    """Load (model, pca, checkpoint). Raises FileNotFoundError when absent."""
+# Module prefixes allowed while unpickling the fitted PCA. Anything outside this
+# set (arbitrary os/subprocess/socket globals, etc.) is refused: the artifact is
+# operator-deployed but we do not trust its pickle bytes to call arbitrary code.
+_ALLOWED_PICKLE_PREFIXES = (
+    "builtins",
+    "numpy",
+    "scipy",
+    "sklearn",
+    "_codecs",
+    "codecs",
+    "collections",
+    "collections.abc",
+    "functools",
+    "operator",
+    "itertools",
+    "copyreg",
+    "posixpath",
+    "os.path",
+    "weakref",
+    "gzip",
+    "io",
+)
+
+
+def _safe_load_pca(pca_path: Path):
+    """Unpickle pca.pkl with a module allow-list; raises on anything else."""
     import pickle
 
+    class _RestrictedUnpickler(pickle.Unpickler):
+        def find_class(self, module, name):
+            if not any(module == p or module.startswith(f"{p}.") for p in _ALLOWED_PICKLE_PREFIXES):
+                raise pickle.UnpicklingError(f"blocked global: {module}.{name}")
+            return super().find_class(module, name)
+
+    with pca_path.open("rb") as fh:
+        return _RestrictedUnpickler(fh).load()
+
+
+def load_runtime(model_dir):
+    """Load (model, pca, checkpoint). Raises FileNotFoundError when absent."""
     cp_path = Path(model_dir) / "model.pt"
     pca_path = Path(model_dir) / "pca.pkl"
-    # Prefer the safe weights_only loader; fall back for legacy artifacts that
-    # embed non-tensor python objects (e.g. numpy arrays). If both fail the
-    # error propagates to callers (get_runtime) which degrade cleanly.
-    try:
-        checkpoint = torch.load(cp_path, map_location="cpu", weights_only=True)
-    except Exception:
-        checkpoint = torch.load(cp_path, map_location="cpu", weights_only=False)
-    pca = pickle.loads(pca_path.read_bytes())
+    # weights_only=True only — legacy artifacts that need arbitrary unpickling
+    # are rejected, and load_runtime's error propagates as a clean 503.
+    checkpoint = torch.load(cp_path, map_location="cpu", weights_only=True)
+    pca = _safe_load_pca(pca_path)
 
     cfg = checkpoint["config"]
     cfg["data"]["pca_components"] = checkpoint.get("pca_components", 0)

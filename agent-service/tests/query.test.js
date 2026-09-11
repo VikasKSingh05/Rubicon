@@ -145,3 +145,27 @@ test("agent refuses to fabricate when the backend is unreachable", async () => {
     config.backendUrl = previous;
   }
 });
+
+test("provider failure degrades to the fallback agent", async () => {
+  const { config } = await import("../src/config.js");
+  const previousProvider = config.llm.provider;
+  const originalFetch = globalThis.fetch;
+  const realFetch = originalFetch.bind(globalThis);
+  config.llm.provider = "openai";
+  process.env.OPENAI_API_KEY = "sk-flaky";
+  globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith("https://api.openai.com")) throw new Error("provider down");
+    return realFetch(url, init);
+  };
+  try {
+    const res = await request(app).post("/agent/query").send({ query: "show severe zones" });
+    assert.equal(res.status, 200);
+    assertContract(res.body);
+    assert.ok(res.body.tool_calls.some((t) => t.tool === "get_recent_assessments" && t.ok));
+    assert.match(res.body.answer, /severe/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.OPENAI_API_KEY;
+    config.llm.provider = previousProvider;
+  }
+});

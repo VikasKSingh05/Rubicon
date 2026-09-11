@@ -1,5 +1,8 @@
 import { Router } from "express";
 import path from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
 import multer from "multer";
 import { requireAuth } from "../middleware/auth.js";
 import Assessment from "../models/Assessment.js";
@@ -8,6 +11,9 @@ import { transition } from "../services/assessmentService.js";
 import { pinBuffer } from "../services/ipfs.js";
 import { logAssessment } from "../services/chainService.js";
 import { config } from "../config.js";
+import { makeLogger } from "../middleware/logger.js";
+
+const logger = makeLogger("upload");
 
 const router = Router();
 
@@ -24,8 +30,30 @@ function multerErrorToResponse(err, res) {
   return res.status(400).json({ error: err?.message || "upload failed" });
 }
 
+function validateMagic(buf, kind) {
+  if (kind === "hsi") {
+    const little = buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00;
+    const big = buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a;
+    return little || big ? null : "hsi file is not a valid TIFF";
+  }
+  return buf.subarray(0, 4).toString("latin1") === "LASF"
+    ? null
+    : "lidar file is not a valid LAS/LAZ point cloud";
+}
+
+// Spool uploads to a per-request temp dir instead of holding 2×100 MB in RAM.
+// destination() reuses one dir per request; the handler removes it in finally.
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination(req, _file, cb) {
+      if (!req.uploadDir) req.uploadDir = mkdtempSync(path.join(os.tmpdir(), "rubicon-"));
+      cb(null, req.uploadDir);
+    },
+    filename(req, file, cb) {
+      const ext = path.extname(file.originalname).toLowerCase();
+      cb(null, `${file.fieldname}${ext}`);
+    },
+  }),
   limits: { fileSize: MAX_BYTES },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -36,6 +64,19 @@ const upload = multer({
   { name: "hsi", maxCount: 1 },
   { name: "lidar", maxCount: 1 },
 ]);
+
+async function persistFiles(assessmentId, files) {
+  const dir = path.join(config.storageDir, assessmentId);
+  await mkdir(dir, { recursive: true });
+  const stored = {};
+  for (const [kind, { buffer, originalname }] of Object.entries(files)) {
+    const ext = path.extname(originalname).toLowerCase();
+    const rel = path.join(assessmentId, `${kind}${ext}`);
+    await writeFile(path.join(config.storageDir, rel), buffer);
+    stored[kind] = rel;
+  }
+  return stored;
+}
 
 // Phase 5 proof pipeline: content-address the uploads as real IPFS CIDv0 values
 // (pinning when Pinata is configured), then log the assessment on-chain (real
@@ -59,16 +100,23 @@ async function attachProof(assessment, files, prediction) {
   return assessment;
 }
 
-// POST /upload — accepts multipart fields hsi + lidar, runs (fake) AI, stores assessment.
+// POST /upload — accepts multipart fields hsi + lidar, runs the real engine,
+// stores evidence, and pins/proves the upload.
 router.post("/", requireAuth, (req, res) => {
   upload(req, res, async (err) => {
-    if (err) return multerErrorToResponse(err, res);
     try {
+      if (err) return multerErrorToResponse(err, res);
+
       const hsi = req.files?.hsi?.[0];
       const lidar = req.files?.lidar?.[0];
       if (!hsi || !lidar) {
         return res.status(400).json({ error: "both hsi and lidar files are required" });
       }
+
+      const hsiBuf = await readFile(hsi.path);
+      const lidarBuf = await readFile(lidar.path);
+      const magicError = validateMagic(hsiBuf, "hsi") || validateMagic(lidarBuf, "lidar");
+      if (magicError) return res.status(400).json({ error: magicError });
 
       const assessment = await Assessment.create({
         user: req.user.sub,
@@ -77,30 +125,57 @@ router.post("/", requireAuth, (req, res) => {
         timestamps: { uploaded: new Date() },
       });
 
-      transition(assessment, "analyzing");
-      const result = await runInference({ hsi, lidar });
-      transition(assessment, "analyzed");
+      try {
+        assessment.storage = await persistFiles(assessment._id.toString(), {
+          hsi: { buffer: hsiBuf, originalname: hsi.originalname },
+          lidar: { buffer: lidarBuf, originalname: lidar.originalname },
+        });
 
-      assessment.prediction = result.prediction;
-      assessment.confidence = result.confidence;
-      assessment.class_probs = result.class_probs;
-      assessment.geojson_polygon = result.geojson_polygon;
-      assessment.model_version = result.model_version;
+        const files = {
+          hsi: { buffer: hsiBuf, originalname: hsi.originalname },
+          lidar: { buffer: lidarBuf, originalname: lidar.originalname },
+        };
 
-      await attachProof(assessment, { hsi, lidar }, result.prediction);
+        transition(assessment, "analyzing");
+        const result = await runInference(files, { requestId: req.requestId });
+        transition(assessment, "analyzed");
 
-      await assessment.save();
+        assessment.prediction = result.prediction;
+        assessment.confidence = result.confidence;
+        assessment.class_probs = result.class_probs;
+        assessment.geojson_polygon = result.geojson_polygon;
+        assessment.model_version = result.model_version;
 
-      return res.status(201).json({
-        assessmentId: assessment._id.toString(),
-        state: assessment.state,
-        ...result,
-        createdAt: assessment.createdAt.toISOString(),
-        links: { detail: `/assessments/${assessment._id.toString()}` },
-      });
-    } catch (error) {
-      console.error("[upload] failed:", error);
-      return res.status(500).json({ error: "internal error during upload" });
+        await attachProof(assessment, files, result.prediction);
+
+        await assessment.save();
+        req.app.locals.metrics.uploads += 1;
+
+        logger.info("upload complete", {
+          requestId: req.requestId,
+          assessmentId: assessment._id.toString(),
+          modelVersion: result.model_version,
+        });
+
+        return res.status(201).json({
+          assessmentId: assessment._id.toString(),
+          state: assessment.state,
+          ...result,
+          createdAt: assessment.createdAt.toISOString(),
+          links: { detail: `/assessments/${assessment._id.toString()}` },
+        });
+      } catch (error) {
+        req.app.locals.metrics.errors += 1;
+        logger.error("upload failed", {
+          requestId: req.requestId,
+          message: error?.message || String(error),
+        });
+        assessment.state = "error";
+        await assessment.save().catch(() => {});
+        return res.status(500).json({ error: "internal error during upload" });
+      }
+    } finally {
+      if (req.uploadDir) rmSync(req.uploadDir, { recursive: true, force: true });
     }
   });
 });

@@ -23,6 +23,7 @@ weights/
 data/
 *.tiff
 *.las
+storage/
 
 # ---- IDE / OS ----
 .vscode/
