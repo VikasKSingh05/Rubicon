@@ -287,6 +287,41 @@ test("upload rejects files whose content does not match the extension", async ()
   assert.equal(res.body.error, "hsi file is not a valid TIFF");
 });
 
+test("files endpoint streams the persisted originals to the owner", async () => {
+  const token = await getToken();
+  const up = await uploadFiles(token);
+
+  const hsi = await request(app).get(`/files/${up.body.assessmentId}/hsi`).set(authHeader(token));
+  assert.equal(hsi.status, 200);
+  assert.equal(hsi.type, "image/tiff");
+  assert.ok(hsi.body.equals(FAKE_HSI));
+  assert.ok(hsi.headers["content-disposition"].includes("scan.tiff"));
+
+  const lidar = await request(app).get(`/files/${up.body.assessmentId}/lidar`).set(authHeader(token));
+  assert.equal(lidar.status, 200);
+  assert.equal(lidar.type, "application/octet-stream");
+  assert.ok(lidar.body.equals(FAKE_LIDAR));
+});
+
+test("files endpoint enforces ownership, valid kinds, and 404s", async () => {
+  const token = await getToken();
+  const up = await uploadFiles(token);
+  const otherToken = await getToken("other@rubicon.dev", "secret456");
+
+  const other = await request(app).get(`/files/${up.body.assessmentId}/hsi`).set(authHeader(otherToken));
+  assert.equal(other.status, 404, "other users must not read files");
+
+  const anon = await request(app).get(`/files/${up.body.assessmentId}/hsi`);
+  assert.equal(anon.status, 401);
+
+  const badKind = await request(app).get(`/files/${up.body.assessmentId}/pointcloud`).set(authHeader(token));
+  assert.equal(badKind.status, 400);
+  assert.equal(badKind.body.error, "kind must be 'hsi' or 'lidar'");
+
+  const missing = await request(app).get(`/files/000000000000000000000000/hsi`).set(authHeader(token));
+  assert.equal(missing.status, 404);
+});
+
 test("assessment detail is scoped to the owning user", async () => {
   const firstToken = await getToken();
   const up = await uploadFiles(firstToken);

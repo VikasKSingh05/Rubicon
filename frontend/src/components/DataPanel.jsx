@@ -1,6 +1,7 @@
 import React from "react";
 import SeverityBadge from "./SeverityBadge.jsx";
 import ChainBadge from "./ChainBadge.jsx";
+import { downloadBlob } from "../lib/api.js";
 
 function Row({ label, value }) {
   return (
@@ -8,6 +9,19 @@ function Row({ label, value }) {
       <span className="text-slate-500">{label}</span>
       <span className="text-right font-medium text-slate-800">{value || "—"}</span>
     </div>
+  );
+}
+
+function DownloadRow({ assessmentId, kind, filename }) {
+  const defaultName = kind === "hsi" ? "HSI data" : "LiDAR data";
+  return (
+    <button
+      onClick={() => downloadBlob(`/files/${assessmentId}/${kind}`, filename || defaultName)}
+      className="flex w-full items-center justify-between rounded-md border border-slate-200 px-2.5 py-1.5 text-xs transition hover:bg-slate-50"
+    >
+      <span className="text-slate-700">{kind === "hsi" ? "HSI" : "LiDAR"}</span>
+      <span className="font-medium text-primary">{filename || defaultName}</span>
+    </button>
   );
 }
 
@@ -46,7 +60,7 @@ function ChainInfo({ a }) {
   );
 }
 
-export default function DataPanel({ assessment }) {
+export default function DataPanel({ assessment, onReverify, reverifyPending }) {
   if (!assessment) return null;
   const a = assessment;
   return (
@@ -85,7 +99,32 @@ export default function DataPanel({ assessment }) {
         {a.timestamps?.chainLogged && (
           <Row label="Chain log" value={new Date(a.timestamps.chainLogged).toLocaleString()} />
         )}
+        {a.hsiCid && onReverify && (
+          <button
+            onClick={onReverify}
+            disabled={reverifyPending}
+            className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            {reverifyPending ? "Re-verifying…" : "Re-verify on chain"}
+          </button>
+        )}
       </section>
+
+      {(a.storage?.hsi || a.storage?.lidar) && (
+        <section className="rounded-lg border border-slate-200 p-3">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Original files
+          </h3>
+          <div className="space-y-1.5">
+            {a.storage?.hsi && (
+              <DownloadRow assessmentId={a.id} kind="hsi" filename={a.filename?.hsi} />
+            )}
+            {a.storage?.lidar && (
+              <DownloadRow assessmentId={a.id} kind="lidar" filename={a.filename?.lidar} />
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

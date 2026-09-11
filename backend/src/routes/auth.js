@@ -6,6 +6,7 @@ import RefreshToken from "../models/RefreshToken.js";
 import { config } from "../config.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { makeLogger } from "../middleware/logger.js";
+import { requireAuth } from "../middleware/auth.js";
 
 const logger = makeLogger("auth");
 
@@ -119,5 +120,28 @@ router.post("/logout", asyncHandler(async (req, res) => {
   res.clearCookie(REFRESH_COOKIE, { path: "/auth" });
   return res.json({ ok: true });
 }));
+
+// POST /auth/change-password — require the current password, then rotate the
+// password and revoke every other refresh session so old cookies stop working.
+router.post(
+  "/change-password",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const currentPassword = String(req.body?.currentPassword ?? "");
+    const newPassword = String(req.body?.newPassword ?? "");
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ error: "currentPassword and newPassword are required" });
+    if (newPassword.length < MIN_PASSWORD_LENGTH)
+      return res.status(400).json({ error: `password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+    const user = await User.findById(req.user.sub).select("+password");
+    if (!user || !(await user.comparePassword(currentPassword)))
+      return res.status(401).json({ error: "current password is incorrect" });
+    user.password = newPassword;
+    await user.save();
+    await RefreshToken.deleteMany({ user: user._id });
+    logger.info("password changed", { requestId: req.requestId, user: user._id.toString() });
+    return res.json({ ok: true });
+  }),
+);
 
 export default router;

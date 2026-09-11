@@ -352,6 +352,11 @@ rotated on every use, revocable server-side; the DB stores only its sha-256).
 | `POST /auth/login` `{ email, password }` | Issues a session; `401` on bad credentials. |
 | `POST /auth/refresh` (cookie) | Rotates the refresh cookie and mints a fresh access token. Reused/revoked cookies → `401`. |
 | `POST /auth/logout` (cookie) | Revokes the refresh session and clears the cookie. |
+| `POST /auth/change-password` `{ currentPassword, newPassword }` | Bearer-authenticated; validates the current password, enforces min length 8, revokes **all** other refresh sessions, `{ ok: true }`. |
+
+| Download endpoint | Action |
+| --- | --- |
+| `GET /files/:id/hsi` / `GET /files/:id/lidar` | Bearer-authenticated, owner-scoped stream of the persisted original (path-traversal safe, path pinned inside `STORAGE_DIR`). `404` for other users / missing files; `400` for a non-`hsi`/`lidar` kind.
 
 Protected routes take `Authorization: Bearer <accessToken>`. The frontend's API
 client replays a `401` once after refreshing; `/auth/*` paths are never replayed.

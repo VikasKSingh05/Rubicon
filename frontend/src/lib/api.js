@@ -79,3 +79,18 @@ export async function initAuth() {
 }
 
 export { API_BASE };
+
+/** Fetch a file download (e.g. /files/:id/hsi) and return a Blob URL. */
+export async function downloadBlob(path, defaultName) {
+  const headers = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const res = await fetch(`${API_BASE}${path}`, { credentials: "include", headers });
+  if (!res.ok) throw new Error("download failed");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = defaultName;
+  a.click();
+  URL.revokeObjectURL(url);
+}

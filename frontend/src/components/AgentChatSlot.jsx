@@ -60,7 +60,7 @@ export default function AgentChatSlot({ assessmentId }) {
       ]);
     } finally {
       setBusy(false);
-      scrollRef.current?.scrollIntoView({ block: "end" });
+      scrollRef.current?.scrollIntoView?.({ block: "end" });
     }
   }
 
@@ -115,6 +115,23 @@ export default function AgentChatSlot({ assessmentId }) {
               >
                 <p className="whitespace-pre-line">{m.text}</p>
                 {!m.error && <ToolChips calls={m.toolCalls} />}
+                {m.createdAt && (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    {new Date(m.createdAt).toLocaleTimeString()}
+                  </p>
+                )}
+                {m.error && (
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      const lastUser = [...messages].reverse().find((x) => x.role === "user");
+                      if (lastUser) ask(lastUser.text);
+                    }}
+                    className="mt-1.5 rounded-full border border-red-300 px-2.5 py-0.5 text-[10px] font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -8,6 +8,7 @@ import authRoutes from "./routes/auth.js";
 import uploadRoutes from "./routes/upload.js";
 import assessmentRoutes from "./routes/assessments.js";
 import chainRoutes from "./routes/chain.js";
+import fileRoutes from "./routes/files.js";
 import { config } from "./config.js";
 import { makeLogger, requestId, requestLogger } from "./middleware/logger.js";
 
@@ -86,6 +87,7 @@ export default function createApp() {
   app.use("/upload", uploadRoutes);
   app.use("/assessments", assessmentRoutes);
   app.use("/chain", chainRoutes);
+  app.use("/files", fileRoutes);
 
   // 404 for unknown routes.
   app.use((_req, res) => {

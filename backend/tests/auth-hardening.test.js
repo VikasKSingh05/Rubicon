@@ -168,3 +168,63 @@ test("validateProductionSecrets refuses the default JWT secret in production", (
     config.jwtSecret = originalConfigSecret;
   }
 });
+
+test("change-password rotates the password and revokes other sessions", async () => {
+  const { res: login, cookie, userId } = await registerUser();
+  const access = login.body.token;
+  const refreshCount = (await RefreshToken.find({ user: userId })).length;
+  assert.equal(refreshCount, 1);
+
+  // Warm a second refresh session before changing the password.
+  const second = await request(app).post("/auth/refresh").set("Cookie", cookie);
+  assert.equal(second.status, 200);
+
+  const wrong = await request(app)
+    .post("/auth/change-password")
+    .set("Authorization", `Bearer ${access}`)
+    .send({ currentPassword: "not-the-password", newPassword: "brand-new-pw-1" });
+  assert.equal(wrong.status, 401);
+  assert.equal(wrong.body.error, "current password is incorrect");
+
+  const changed = await request(app)
+    .post("/auth/change-password")
+    .set("Authorization", `Bearer ${access}`)
+    .send({ currentPassword: PASSWORD, newPassword: "brand-new-pw-1" });
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.ok, true);
+
+  assert.equal(
+    (await RefreshToken.find({ user: userId })).length,
+    0,
+    "all refresh sessions must be revoked after a password change",
+  );
+
+  // Old credentials fail; the new password logs in cleanly.
+  const oldLogin = await request(app).post("/auth/login").send({ email: login.body.user.email, password: PASSWORD });
+  assert.equal(oldLogin.status, 401);
+  const newLogin = await request(app).post("/auth/login").send({ email: login.body.user.email, password: "brand-new-pw-1" });
+  assert.equal(newLogin.status, 200);
+
+  // Repeated old refresh cookie is now rejected (sessions were revoked).
+  const replayed = await request(app).post("/auth/refresh").set("Cookie", cookie);
+  assert.equal(replayed.status, 401);
+});
+
+test("change-password requires auth and enforces length", async () => {
+  const anon = await request(app).post("/auth/change-password").send({ currentPassword: "x", newPassword: "y" });
+  assert.equal(anon.status, 401);
+
+  const { res: login } = await registerUser();
+  const short = await request(app)
+    .post("/auth/change-password")
+    .set("Authorization", `Bearer ${login.body.token}`)
+    .send({ currentPassword: PASSWORD, newPassword: "short" });
+  assert.equal(short.status, 400);
+  assert.equal(short.body.error, "password must be at least 8 characters");
+
+  const missing = await request(app)
+    .post("/auth/change-password")
+    .set("Authorization", `Bearer ${login.body.token}`)
+    .send({ currentPassword: PASSWORD });
+  assert.equal(missing.status, 400);
+});
