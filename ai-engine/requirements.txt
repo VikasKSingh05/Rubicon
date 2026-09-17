@@ -16,5 +16,5 @@ requests>=2.31
 jupyterlab>=4.1
 
 # ---- Phase 3 model ----
-torch>=2.6
+torch>=2.0
 python-multipart>=0.0.9
