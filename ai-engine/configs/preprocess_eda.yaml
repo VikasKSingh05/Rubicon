@@ -1,0 +1,21 @@
+# Rubicon Data Preprocessing & EDA Configuration
+# Purpose: Load dataset, align multi-modal data, apply PCA, patchify, and prepare for EDA (No splitting or model training)
+
+data:
+  root: data/houston2013
+  hsi: Houston_2013_HSI.tif          # 349 x 1905 x 144 bands (CASI, 2.5 m GSD)
+  lidar: Houston_2013_DSM.tif        # LiDAR DSM height grid / .las point cloud
+  lidar_resolution: 2.5              # meters per cell
+  labels: Houston_2013_GT.tif        # 15 land-cover classes, 0 = background
+
+pipeline:
+  patch_size: 32                     # Spatial patch dimension (32x32 pixels)
+  overlap: 0.0                       # Sliding window overlap (0.0 = non-overlapping)
+  min_labeled: 0.5                   # Discard patches with < 50% labeled pixels
+  pca_variance: 0.99                 # Retain 99% explained spectral variance
+
+output:
+  root: data/preprocessed
+  npz: preprocessed_houston2013.npz  # Full preprocessed dataset (X_hsi, X_dem, y_class, y_sev, coords)
+  pca: pca_fitted.pkl                # Fitted PCA model for dimensionality reduction
+  metadata: metadata_preprocessed.json # Dataset & preprocessing summary statistics
