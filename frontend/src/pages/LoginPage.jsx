@@ -6,7 +6,7 @@ import FormInput from "../components/FormInput.jsx";
 import SubmitButton from "../components/SubmitButton.jsx";
 
 export default function LoginPage() {
-  const { login, register, error } = useAuth();
+  const { login, register, enterDemo, error } = useAuth();
   const navigate = useNavigate();
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -19,6 +19,11 @@ export default function LoginPage() {
     const submit = mode === "login" ? login : register;
     const { ok } = await submit(email, password);
     setLoading(false);
+    if (ok) navigate("/", { replace: true });
+  }
+
+  function handleDemo() {
+    const { ok } = enterDemo();
     if (ok) navigate("/", { replace: true });
   }
 
@@ -71,6 +76,23 @@ export default function LoginPage() {
           {mode === "login" ? "Sign in" : "Create account"}
         </SubmitButton>
       </form>
+
+      <div className="mt-4 flex items-center gap-3">
+        <hr className="flex-1 border-slate-200" />
+        <span className="text-xs text-slate-400">or</span>
+        <hr className="flex-1 border-slate-200" />
+      </div>
+
+      <button
+        type="button"
+        onClick={handleDemo}
+        className="mt-4 w-full rounded-lg border-2 border-dashed border-primary/40 bg-primary/5 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/10 hover:border-primary/60"
+      >
+        🚀 Enter Demo Mode
+      </button>
+      <p className="mt-2 text-center text-xs text-slate-400">
+        Explore the full UI with mock data — no backend required.
+      </p>
 
       <p className="mt-4 text-center text-xs text-slate-400">
         Sign-in uses a short-lived access token (kept in memory) and a revocable
