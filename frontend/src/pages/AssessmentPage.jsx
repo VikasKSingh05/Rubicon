@@ -5,10 +5,14 @@ import TopBar from "../components/TopBar.jsx";
 import MapView from "../components/MapView.jsx";
 import DataPanel from "../components/DataPanel.jsx";
 import AgentChatSlot from "../components/AgentChatSlot.jsx";
+import DroneInspectorModal from "../components/DroneInspectorModal.jsx";
 
 export default function AssessmentPage() {
   const { id } = useParams();
   const [assessment, setAssessment] = useState(null);
+  const [cells, setCells] = useState(null);
+  const [selectedCellId, setSelectedCellId] = useState(null);
+  const [isDroneModalOpen, setIsDroneModalOpen] = useState(false);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState(0);
   const [reverifyPending, setReverifyPending] = useState(false);
@@ -25,6 +29,18 @@ export default function AssessmentPage() {
           setStatus(err.status || 0);
         }
       });
+
+    // Also fetch H3 cells
+    api(`/assessments/${id}/cells`)
+      .then((data) => {
+        if (!cancelled && data?.cells) {
+          setCells(data.cells);
+        }
+      })
+      .catch(() => {
+        // Cells endpoint failure is non-fatal — map still renders polygon
+      });
+
     return () => {
       cancelled = true;
     };
@@ -45,6 +61,11 @@ export default function AssessmentPage() {
       setReverifyPending(false);
     }
   }, [assessment?.hsiCid, id, reverifyPending]);
+
+  function handleInspectCell(cellId) {
+    setSelectedCellId(cellId);
+    setIsDroneModalOpen(true);
+  }
 
   if (error) {
     const notFound = status === 404;
@@ -94,9 +115,28 @@ export default function AssessmentPage() {
       <TopBar onUpload={() => {}} />
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <main className="min-h-[50vh] min-w-0 flex-1 lg:min-h-0">
-          <MapView polygons={[assessment]} center={center} />
+          <MapView
+            polygons={[assessment]}
+            cells={cells}
+            center={center}
+            onInspectCell={handleInspectCell}
+          />
         </main>
         <aside className="flex w-full shrink-0 flex-col border-t border-slate-300 bg-white sm:w-full lg:w-[380px] lg:border-l lg:border-t-0">
+          {/* Stage 2 Action Bar */}
+          <div className="border-b border-slate-200 bg-slate-50/80 px-4 py-2.5">
+            <button
+              onClick={() => {
+                setSelectedCellId(cells?.features?.[0]?.properties?.cell_id || null);
+                setIsDroneModalOpen(true);
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              <span>🚁</span>
+              <span>Launch Stage 2 Drone Triage</span>
+            </button>
+          </div>
+
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <DataPanel
               assessment={assessment}
@@ -109,6 +149,13 @@ export default function AssessmentPage() {
           </div>
         </aside>
       </div>
+
+      <DroneInspectorModal
+        isOpen={isDroneModalOpen}
+        onClose={() => setIsDroneModalOpen(false)}
+        parentCellId={selectedCellId}
+        assessmentId={id}
+      />
     </div>
   );
 }

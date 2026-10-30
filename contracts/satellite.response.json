@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SatelliteTriageResponse",
+  "type": "object",
+  "required": [
+    "pre_sha256",
+    "post_sha256",
+    "buildings_geojson",
+    "cells_geojson_r9",
+    "cells_geojson_r10",
+    "model_version",
+    "damage_classes"
+  ],
+  "properties": {
+    "pre_sha256": {
+      "type": "string"
+    },
+    "post_sha256": {
+      "type": "string"
+    },
+    "buildings_geojson": {
+      "type": "object"
+    },
+    "cells_geojson_r9": {
+      "type": "object"
+    },
+    "cells_geojson_r10": {
+      "type": "object"
+    },
+    "model_version": {
+      "type": "string"
+    },
+    "damage_classes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "exec_ms": {
+      "type": "number"
+    },
+    "requestId": {
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DroneTriageResponse",
+  "type": "object",
+  "required": [
+    "image_sha256",
+    "damage_percentage",
+    "damage_level",
+    "severity",
+    "failure_modes",
+    "model_version"
+  ],
+  "properties": {
+    "image_sha256": {
+      "type": "string"
+    },
+    "parent_cell_id": {
+      "type": ["string", "null"]
+    },
+    "damage_percentage": {
+      "type": "number"
+    },
+    "damage_level": {
+      "type": "string",
+      "enum": ["none", "minor", "major", "destroyed"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["GREEN", "YELLOW", "ORANGE", "RED"]
+    },
+    "failure_modes": {
+      "type": "object",
+      "properties": {
+        "roof_collapse": {
+          "type": "object",
+          "properties": {
+            "detected": { "type": "boolean" },
+            "confidence": { "type": "number" },
+            "area_pct": { "type": "number" }
+          }
+        },
+        "facade_failure": {
+          "type": "object",
+          "properties": {
+            "detected": { "type": "boolean" },
+            "confidence": { "type": "number" },
+            "area_pct": { "type": "number" }
+          }
+        },
+        "debris_field": {
+          "type": "object",
+          "properties": {
+            "detected": { "type": "boolean" },
+            "confidence": { "type": "number" },
+            "area_pct": { "type": "number" }
+          }
+        }
+      }
+    },
+    "geojson_features": {
+      "type": "object"
+    },
+    "assessmentId": {
+      "type": ["string", "null"]
+    },
+    "model_version": {
+      "type": "string"
+    },
+    "exec_ms": {
+      "type": "number"
+    },
+    "requestId": {
+      "type": "string"
+    }
+  }
+}

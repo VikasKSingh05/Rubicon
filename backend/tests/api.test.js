@@ -225,12 +225,21 @@ test("unknown routes return a JSON 404", async () => {
   assert.deepEqual(res.body, { error: "not found" });
 });
 
-test("async handler surfaces internal errors as JSON 500s (no hung request)", async () => {
+test("malformed assessment ids are answered as 404s (never a cast error or hung request)", async () => {
   const token = await getToken();
-  // "zzz" is not a valid ObjectId → mongoose CastError inside the handler.
-  const res = await request(app).get("/assessments/zzz").set(authHeader(token));
-  assert.equal(res.status, 500);
-  assert.deepEqual(res.body, { error: "internal server error" });
+  // "zzz" is not a valid ObjectId — it must be rejected before mongoose sees it.
+  const bad = await request(app).get("/assessments/zzz").set(authHeader(token));
+  assert.equal(bad.status, 404);
+  assert.deepEqual(bad.body, { error: "assessment not found" });
+
+  // The file route used to run an unwrapped async handler, so a malformed id
+  // rejected inside mongoose and killed the process instead of answering.
+  const file = await request(app).get("/files/zzz/hsi").set(authHeader(token));
+  assert.equal(file.status, 404);
+  assert.deepEqual(file.body, { error: "assessment not found" });
+
+  const stillAlive = await request(app).get("/health");
+  assert.equal(stillAlive.status, 200);
 });
 
 test("assessments list paginates with limit/offset and reports total", async () => {

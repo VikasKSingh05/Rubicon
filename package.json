@@ -1,0 +1,13 @@
+{
+  "name": "rubicon",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rubicon end-to-end smoke harness (service-agnostic root scripts)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "e2e:setup": "node e2e/setup-fixtures.mjs",
+    "e2e": "node e2e/smoke.mjs"
+  }
+}

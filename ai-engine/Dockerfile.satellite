@@ -1,0 +1,23 @@
+FROM python:3.13.1-slim-bookworm
+
+# Install system dependencies for rasterio/GDAL and OpenCV
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libexpat1 \
+        libgl1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Verify native dependencies at build time
+RUN python -c "import rasterio, numpy, torch, cv2, h3, segmentation_models_pytorch"
+
+COPY ai_engine ./ai_engine
+
+EXPOSE 8002
+
+CMD ["uvicorn", "ai_engine.serve:app", "--host", "0.0.0.0", "--port", "8002"]

@@ -52,6 +52,25 @@ def test_rasterize_las_grid(tmp_path):
     assert transform.f == 10.0
 
 
+def test_rasterize_las_raises_when_no_points_fall_in_bounds(tmp_path):
+    """A mis-registered cloud must fail loudly, not hand back an all-NaN DEM.
+
+    An all-NaN DEM propagates through patchify/normalize into the network and
+    used to surface as NaN confidences instead of a clear error.
+    """
+    import laspy
+
+    path = tmp_path / "offset.las"
+    las = laspy.create(point_format=laspy.PointFormat(2))
+    las.x = np.array([500.0, 505.0])
+    las.y = np.array([500.0, 500.0])
+    las.z = np.array([1.0, 2.0])
+    las.write(path)
+
+    with pytest.raises(ValueError, match="no LiDAR points fall inside"):
+        rasterize_las(path, resolution=5, bounds=(0, 30, 0, 10))
+
+
 def test_align_different_grids_warp():
     import rasterio as rio
     from rasterio.transform import Affine

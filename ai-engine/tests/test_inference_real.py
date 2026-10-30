@@ -132,6 +132,22 @@ def test_predict_with_real_model(trained_artifact, monkeypatch):
     assert body["model_version"] == "baseline_cnn-v1"
 
 
+def test_predict_files_refuses_non_finite_output(trained_artifact):
+    """NaN confidences must never be serialized into the contract."""
+    import torch
+    from src.model.serving import load_runtime, predict_files
+
+    model_dir, hsi_path, dem_path = trained_artifact
+    _model, pca, checkpoint = load_runtime(model_dir)
+
+    class _NaNModel:
+        def __call__(self, x_hsi, x_dem):
+            return torch.full((x_hsi.shape[0], 3), float("nan"))
+
+    with pytest.raises(ValueError, match="non-finite"):
+        predict_files(hsi_path, dem_path, _NaNModel(), pca, checkpoint)
+
+
 def test_predict_stub_when_no_model(monkeypatch):
     monkeypatch.setenv("RUBICON_MODEL_DIR", tempfile.mkdtemp())
     inference_app._runtime = None

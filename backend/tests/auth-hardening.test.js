@@ -169,19 +169,25 @@ test("validateProductionSecrets refuses the default JWT secret in production", (
   }
 });
 
-test("change-password rotates the password and revokes other sessions", async () => {
-  const { res: login, cookie, userId } = await registerUser();
+test("change-password rotates the password, keeps the caller's session, and revokes the rest", async () => {
+  const { res: login, cookie: ownCookie, userId } = await registerUser();
   const access = login.body.token;
-  const refreshCount = (await RefreshToken.find({ user: userId })).length;
-  assert.equal(refreshCount, 1);
+  const ownToken = ownCookie.split(";")[0].split("=")[1];
+  assert.equal((await RefreshToken.find({ user: userId })).length, 1);
 
-  // Warm a second refresh session before changing the password.
-  const second = await request(app).post("/auth/refresh").set("Cookie", cookie);
-  assert.equal(second.status, 200);
+  // A second device: same user, independent refresh session.
+  const otherDevice = await request(app)
+    .post("/auth/login")
+    .send({ email: login.body.user.email, password: PASSWORD });
+  assert.equal(otherDevice.status, 200);
+  const otherCookie = cookieFrom(otherDevice);
+  const otherToken = otherCookie.split(";")[0].split("=")[1];
+  assert.equal((await RefreshToken.find({ user: userId })).length, 2);
 
   const wrong = await request(app)
     .post("/auth/change-password")
     .set("Authorization", `Bearer ${access}`)
+    .set("Cookie", ownCookie)
     .send({ currentPassword: "not-the-password", newPassword: "brand-new-pw-1" });
   assert.equal(wrong.status, 401);
   assert.equal(wrong.body.error, "current password is incorrect");
@@ -189,25 +195,29 @@ test("change-password rotates the password and revokes other sessions", async ()
   const changed = await request(app)
     .post("/auth/change-password")
     .set("Authorization", `Bearer ${access}`)
+    .set("Cookie", ownCookie)
     .send({ currentPassword: PASSWORD, newPassword: "brand-new-pw-1" });
   assert.equal(changed.status, 200);
   assert.equal(changed.body.ok, true);
 
-  assert.equal(
-    (await RefreshToken.find({ user: userId })).length,
-    0,
-    "all refresh sessions must be revoked after a password change",
-  );
+  const survivors = await RefreshToken.find({ user: userId });
+  assert.equal(survivors.length, 1, "only the session that changed the password must survive");
+  assert.equal(survivors[0].hash, hash(ownToken), "the surviving session must be the caller's own");
+
+  // The other device's cookie is dead.
+  const otherRes = await request(app).post("/auth/refresh").set("Cookie", otherCookie);
+  assert.equal(otherRes.status, 401);
+
+  // The changing device keeps working (rotating proves the session is live).
+  const ownRes = await request(app).post("/auth/refresh").set("Cookie", ownCookie);
+  assert.equal(ownRes.status, 200);
+  assert.ok(ownRes.body.token);
 
   // Old credentials fail; the new password logs in cleanly.
   const oldLogin = await request(app).post("/auth/login").send({ email: login.body.user.email, password: PASSWORD });
   assert.equal(oldLogin.status, 401);
   const newLogin = await request(app).post("/auth/login").send({ email: login.body.user.email, password: "brand-new-pw-1" });
   assert.equal(newLogin.status, 200);
-
-  // Repeated old refresh cookie is now rejected (sessions were revoked).
-  const replayed = await request(app).post("/auth/refresh").set("Cookie", cookie);
-  assert.equal(replayed.status, 401);
 });
 
 test("change-password requires auth and enforces length", async () => {

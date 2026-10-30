@@ -21,9 +21,17 @@ venv/
 # ---- Data / weights (large, gitignored per spec) ----
 weights/
 data/
+checkpoints/
+*.pt
+*.pth
 *.tiff
 *.las
 storage/
+runs/
+
+# E2E fixtures are small, purpose-built assets that CI needs: keep them tracked.
+!e2e/fixtures/scan/*.tiff
+!e2e/fixtures/scan/*.las
 
 # ---- IDE / OS ----
 .vscode/

@@ -26,6 +26,25 @@ services:
       timeout: 5s
       retries: 5
 
+  ai-engine-satellite:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile.satellite
+    container_name: rubicon-ai-engine-sat
+    environment:
+      - PORT=8002
+      - RUBICON_MODEL_DIR=/app/data/models
+      - AI_ENGINE_MAX_MB=${MAX_UPLOAD_MB:-200}
+    ports:
+      - "${SAT_ENGINE_PORT:-8002}:8002"
+    volumes:
+      - ./ai-engine/data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   agent-service:
     build: ./agent-service
     container_name: rubicon-agent-service
@@ -55,10 +74,11 @@ services:
       - BACKEND_PORT=4000
       - MONGO_URI=${MONGO_URI:-mongodb://mongodb:27017/rubicon}
       - AI_ENGINE_URL=http://ai-engine:8000
+      - SAT_ENGINE_URL=http://ai-engine-satellite:8002
       - NODE_ENV=${NODE_ENV:-development}
       - JWT_SECRET=${JWT_SECRET}
       - ACCESS_TOKEN_TTL=${ACCESS_TOKEN_TTL:-15m}
-      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-100}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-200}
       - STORAGE_DIR=${STORAGE_DIR:-/app/storage}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
       - RATE_LIMIT_DISABLED=${RATE_LIMIT_DISABLED:-0}
@@ -75,6 +95,8 @@ services:
       mongodb:
         condition: service_healthy
       ai-engine:
+        condition: service_healthy
+      ai-engine-satellite:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]

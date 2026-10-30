@@ -68,9 +68,17 @@ def rasterize_las(path, resolution: float = DEFAULT_RESOLUTION, bounds=None):
         & (y <= ymax)
         & np.isfinite(z)
     )
-    if inside.any():
-        # fmax ignores the NaN seed (unlike maximum) so first-return z survives
-        np.fmax.at(dem, (row_idx[inside], col_idx[inside]), z[inside])
+    if not inside.any():
+        # Mis-registered cloud (or an empty file) would otherwise hand a
+        # fully-NaN DEM downstream, which surfaces as NaN confidences instead
+        # of a clear failure. Fail loudly so the caller degrades explicitly.
+        raise ValueError(
+            "no LiDAR points fall inside the requested bounds "
+            f"(x:{xmin:.2f}..{xmax:.2f}, y:{ymin:.2f}..{ymax:.2f}); "
+            f"{len(las.points)} points read from {path}"
+        )
+    # fmax ignores the NaN seed (unlike maximum) so first-return z survives
+    np.fmax.at(dem, (row_idx[inside], col_idx[inside]), z[inside])
 
     transform = Affine(resolution, 0, xmin, 0, -resolution, ymax)
     return dem, transform, None

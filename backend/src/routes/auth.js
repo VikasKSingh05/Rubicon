@@ -122,7 +122,8 @@ router.post("/logout", asyncHandler(async (req, res) => {
 }));
 
 // POST /auth/change-password — require the current password, then rotate the
-// password and revoke every other refresh session so old cookies stop working.
+// password and revoke every *other* refresh session so a stolen cookie stops
+// working, while the session making the change stays usable.
 router.post(
   "/change-password",
   requireAuth,
@@ -138,7 +139,15 @@ router.post(
       return res.status(401).json({ error: "current password is incorrect" });
     user.password = newPassword;
     await user.save();
-    await RefreshToken.deleteMany({ user: user._id });
+
+    // Keep the caller's own session (identified by the refresh cookie it sent);
+    // revoke everything else. With no cookie we cannot identify the caller, so
+    // every session is revoked.
+    const currentCookie = req.cookies?.[REFRESH_COOKIE];
+    await RefreshToken.deleteMany({
+      user: user._id,
+      ...(currentCookie ? { hash: { $ne: hashRefresh(currentCookie) } } : {}),
+    });
     logger.info("password changed", { requestId: req.requestId, user: user._id.toString() });
     return res.json({ ok: true });
   }),

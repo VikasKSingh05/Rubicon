@@ -153,6 +153,11 @@ def predict_files(hsi_path, lidar_path, model, pca, checkpoint):
             patch_results.append((tuple(patches["coords"][i]), (probs, int(probs.argmax()))))
 
     mean_probs = np.mean([p for _, (p, _) in patch_results], axis=0)
+    # Degenerate inputs (e.g. a DEM patch with no coverage) can propagate NaN
+    # through the network. Refuse to answer rather than serialize NaN into the
+    # contract, where it would become a null confidence in stored assessments.
+    if not np.isfinite(mean_probs).all():
+        raise ValueError("model produced non-finite class probabilities")
     pred_cls = int(mean_probs.argmax())
     confidence = float(mean_probs[pred_cls])
 

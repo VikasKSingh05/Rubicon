@@ -9,6 +9,8 @@ import uploadRoutes from "./routes/upload.js";
 import assessmentRoutes from "./routes/assessments.js";
 import chainRoutes from "./routes/chain.js";
 import fileRoutes from "./routes/files.js";
+import satelliteRoutes from "./routes/satellite.js";
+import droneRoutes from "./routes/drone.js";
 import { config } from "./config.js";
 import { makeLogger, requestId, requestLogger } from "./middleware/logger.js";
 
@@ -46,6 +48,14 @@ export default function createApp() {
     );
     app.use(
       "/upload",
+      rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, handler: standardHandler }),
+    );
+    app.use(
+      "/satellite",
+      rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, handler: standardHandler }),
+    );
+    app.use(
+      "/drone",
       rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, handler: standardHandler }),
     );
   }
@@ -88,6 +98,8 @@ export default function createApp() {
   app.use("/assessments", assessmentRoutes);
   app.use("/chain", chainRoutes);
   app.use("/files", fileRoutes);
+  app.use("/satellite", satelliteRoutes);
+  app.use("/drone", droneRoutes);
 
   // 404 for unknown routes.
   app.use((_req, res) => {

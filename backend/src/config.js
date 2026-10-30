@@ -6,6 +6,8 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || "dev-secret-change-me",
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL || "15m",
   aiEngineUrl: process.env.AI_ENGINE_URL || "http://localhost:8000",
+  satEngineUrl: process.env.SAT_ENGINE_URL || "http://localhost:8002",
+
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB) || 100,
   storageDir: process.env.STORAGE_DIR || "storage",
   corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:3000")
