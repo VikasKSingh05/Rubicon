@@ -10,7 +10,7 @@ export const config = {
 
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB) || 100,
   storageDir: process.env.STORAGE_DIR || "storage",
-  corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:3000")
+  corsOrigins: (process.env.CORS_ORIGINS || "http://localhost:3000,http://127.0.0.1:3000")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),

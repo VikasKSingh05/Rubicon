@@ -37,7 +37,12 @@ export default function createApp() {
       },
     }),
   );
-  app.use(cors({ origin: config.corsOrigins }));
+  app.use(
+    cors({
+      origin: config.corsOrigins,
+      credentials: true,
+    }),
+  );
   app.use(express.json());
   app.use(cookieParser());
 
