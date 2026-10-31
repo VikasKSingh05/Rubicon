@@ -12,7 +12,7 @@ function formatTime(iso) {
   }
 }
 
-export default function TopBar({ onUpload, onRefresh, refreshing }) {
+export default function TopBar({ onUpload, onRefresh, refreshing, onSeedXbd }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [changeOpen, setChangeOpen] = useState(false);
@@ -29,15 +29,25 @@ export default function TopBar({ onUpload, onRefresh, refreshing }) {
           Disaster Assessment
         </span>
       </button>
-      <div className="flex items-center gap-3">
-        <span className="hidden max-w-48 truncate text-xs text-white/80 sm:inline">
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
+        <span className="hidden md:inline max-w-44 truncate text-xs text-white/80">
           {user?.email}
         </span>
+        {onSeedXbd && (
+          <button
+            type="button"
+            onClick={onSeedXbd}
+            className="rounded-md border border-white/30 px-2 py-1 text-xs font-semibold text-white transition hover:bg-white/15"
+            title="Load trained xBD satellite disaster scenes into assessment list"
+          >
+            🛰️ <span className="hidden sm:inline">Load</span> xBD Scenes
+          </button>
+        )}
         {onRefresh && (
           <button
             onClick={onRefresh}
             disabled={refreshing}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+            className="rounded-lg border border-slate-300 px-2.5 py-1 text-sm text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
             title="Refresh"
           >
             {refreshing ? "↻" : "⟳"}
@@ -45,9 +55,10 @@ export default function TopBar({ onUpload, onRefresh, refreshing }) {
         )}
         <button
           onClick={onUpload}
-          className="rounded-md bg-verify px-3 py-1.5 text-sm font-semibold text-white transition-colors hover:bg-verify/90"
+          className="rounded-md bg-verify px-2.5 py-1 text-xs sm:text-sm font-semibold text-white transition-colors hover:bg-verify/90"
         >
-          + Upload New Scan
+          <span className="hidden sm:inline">+ Upload New Scan</span>
+          <span className="sm:hidden">+ Upload</span>
         </button>
         <button
           onClick={() => setChangeOpen(true)}
@@ -90,6 +101,9 @@ export function AssessmentList({ assessments, activeId, onSelect, loading = fals
     <ul className="divide-y divide-slate-200">
       {assessments.map((a) => {
         const active = a.id === activeId;
+        const disasterTitle = a.filename?.pre
+          ? a.filename.pre.replace(/_pre_disaster\.(png|tiff?)/i, "").replace(/_\d+$/, "").replace(/-/g, " ")
+          : null;
         return (
           <li key={a.id}>
             <button
@@ -103,13 +117,24 @@ export function AssessmentList({ assessments, activeId, onSelect, loading = fals
                 style={{ backgroundColor: severityOf(a.prediction).color }}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-slate-800">
-                  {a.prediction || "Unknown"}
-                </p>
-                <p className="mt-1 truncate text-xs text-slate-500">
+                {disasterTitle ? (
+                  <>
+                    <p className="truncate text-xs font-bold text-slate-900 capitalize">
+                      {disasterTitle}
+                    </p>
+                    <p className="truncate text-[11px] font-medium text-slate-600">
+                      {a.prediction || "Unknown"}
+                    </p>
+                  </>
+                ) : (
+                  <p className="truncate text-sm font-medium text-slate-800">
+                    {a.prediction || "Unknown"}
+                  </p>
+                )}
+                <p className="mt-0.5 truncate text-xs text-slate-500">
                   {a.center ? `${a.center.lat.toFixed(4)}, ${a.center.lng.toFixed(4)}` : "no coords"}
                 </p>
-                <p className="mt-0.5 text-xs text-slate-400">{formatTime(a.createdAt)}</p>
+                <p className="mt-0.5 text-[10px] text-slate-400">{formatTime(a.createdAt)}</p>
               </div>
             </button>
           </li>

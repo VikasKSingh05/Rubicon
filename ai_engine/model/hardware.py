@@ -12,7 +12,10 @@ import shutil
 from dataclasses import dataclass, field
 from typing import Dict, Any
 
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 import torch
 
 
@@ -37,7 +40,10 @@ class HardwareProfile:
 def detect_hardware() -> HardwareProfile:
     """Auto-detect system hardware and return optimal training/inference profile."""
     # RAM and Disk
-    ram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+    if psutil is not None:
+        ram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+    else:
+        ram_gb = 16.0
     disk_free_gb = round(shutil.disk_usage(os.getcwd()).free / (1024 ** 3), 1)
 
     has_cuda = torch.cuda.is_available()

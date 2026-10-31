@@ -10,10 +10,10 @@ Rubicon consists of 4 core services communicating via HTTP:
 
 | Service | Technology | Port | Purpose |
 |---|---|---|---|
-| **Frontend** | React 18 + Vite + Leaflet | `3000` | Map-based assessment dashboard, file upload modal, AI chat panel |
+| **Frontend** | React 18 + Vite + Leaflet | `3000` | Map-based assessment dashboard, dual-temporal upload modal, AI chat panel |
 | **Backend** | Node.js + Express + Mongoose | `4000` | REST API, JWT auth, assessment storage, IPFS/blockchain pipeline |
 | **Agent Service** | Node.js + Express (Tool-Grounded) | `8001` | Conversational assistant querying live backend data |
-| **AI Engine** | FastAPI + PyTorch + Mamba/Transformer | `8000` | Multimodal HSI + LiDAR inference (falls back to deterministic stub if offline) |
+| **AI Engine** | FastAPI + PyTorch + Siamese U-Net | `8000` | xBD pre/post optical satellite change detection (falls back to deterministic stub if offline) |
 | **Database** | MongoDB | `27017` | Persistent data storage |
 
 > **Graceful Degradation Design**: Without GPU/PyTorch or blockchain testnet keys, Rubicon automatically falls back to deterministic stubs. The entire application runs and functions 100% end-to-end without crashing.
@@ -116,9 +116,9 @@ npm.cmd run dev
 If you want to run the native AI engine locally:
 ```powershell
 cd ai-engine
-python -m uvicorn src.inference:app --host 0.0.0.0 --port 8000
+python -m uvicorn ai_engine.serve:app --host 0.0.0.0 --port 8000
 ```
-> **Interview Talking Point:** *"The backend is designed with a resilient circuit breaker pattern. If the AI Engine is not started or reachable, the backend gracefully falls back to deterministic inference (`stubPredict`), preserving 100% of user workflow: upload, polygon mapping, verification, and chat."*
+> **Interview Talking Point:** *"The backend is designed with a resilient circuit breaker pattern. If the AI Engine is not started or reachable, the backend gracefully falls back to deterministic inference (`stubPredict`), returning valid xBD class distributions and preserving 100% of user workflow: upload, polygon mapping, verification, and chat."*
 
 ---
 
@@ -132,6 +132,51 @@ Or run individually:
 - **Backend (59 tests):** `cd backend && npm.cmd test`
 - **Agent Service (21 tests):** `cd agent-service && npm.cmd test`
 - **Frontend (33 tests):** `cd frontend && npm.cmd test`
+- **AI Engine (xBD data pipeline):** `cd ai-engine && pytest tests/test_xbd_data.py`
+
+---
+
+## 🔬 xBD Exploratory Data Analysis (EDA) & Hyperparameter Tuning
+
+### 1. Generate Synthetic xBD Dataset (for fast local dev / CI)
+```powershell
+cd ai-engine
+python -c "from ai_engine.data.synthetic import generate_synthetic_dataset; generate_synthetic_dataset(output_dir='data/synthetic_xbd', num_pairs=8)"
+```
+
+### 2. Run Exploratory Data Analysis (EDA)
+Inspect xBD class distribution, polygon pixel areas, disaster event breakdown, and computed inverse-frequency loss weights:
+```powershell
+cd ai-engine
+# Fast synthetic run
+python scripts/eda_xbd.py --synthetic
+
+# Or run against full downloaded xBD directory:
+python scripts/eda_xbd.py --data-dir data/xbd --save-summary data/eda_summary.json
+```
+Interactive Jupyter Notebook:
+```powershell
+cd ai-engine
+jupyter lab notebooks/eda.ipynb
+```
+
+### 3. Run Hyperparameter Tuning
+Search optimal backbone encoders (`resnet18`, `resnet34`), learning rates, localization loss weights, and focal loss gamma:
+```powershell
+cd ai-engine
+# Fast synthetic test run (5 trials)
+python scripts/tune_hyperparams.py --synthetic --trials 5 --epochs 1 --dry-run
+
+# Full GPU search run:
+python scripts/tune_hyperparams.py --data-dir data/xbd --trials 20 --epochs 10 --device cuda
+```
+
+### 4. Interactive GIS Heatmap on Frontend
+The Frontend dashboard (`http://localhost:3000`) includes a Leaflet GIS layer for xBD disaster hotspots:
+1. Open **`http://localhost:3000`**.
+2. Look at the top-right GIS Layer Control box on the map.
+3. Toggle the **"xBD Trained Data"** checkbox to overlay concentric radial damage intensity heatmaps (Santa Rosa Fire, Hurricane Michael, Mexico City Earthquake, Volcán de Fuego, Pinery Bushfire, Midwest Floods).
+4. Use the filter chips (**All Layers**, **Damage Heatmap**, **H3 Grid**, **Footprints**) to isolate disaster density gradients.
 
 ---
 
@@ -168,10 +213,11 @@ Or run individually:
 
 1. Open **`http://localhost:3000`**.
 2. Click **Register** → Create an account with any email (`demo@rubicon.dev`) and password (`Password123`).
-3. Click **Upload Scan** on the dashboard.
-4. Upload test files (or any sample images/files).
-5. Watch the dashboard plot the damage polygon on the Leaflet map with computed severity and risk metrics.
-6. Open the **AI Assistant** chat panel on the right and ask:
+3. Click **+ Upload** on the top bar to open the **xBD Satellite Assessment** modal.
+4. Drag in paired pre-disaster and post-disaster optical satellite scans (PNG, JPG, or TIFF).
+5. Watch the dashboard plot the damage polygon on the Leaflet map with computed xBD damage classification (`No Damage`, `Minor Damage`, `Major Damage`, or `Destroyed`) and class confidence distribution.
+6. Click the polygon to inspect the cryptographic IPFS CIDs and Polygon Amoy transaction verification.
+7. Open the **AI Assistant** chat panel on the right and ask:
    - *"How many assessments do we have?"*
    - *"Show me severe damage zones."*
    The assistant uses tool-grounded function calling against the live backend database to answer accurately.

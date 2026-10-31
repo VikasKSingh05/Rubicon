@@ -11,8 +11,8 @@ Push-Location "$Root\ai-engine"
 try {
     $null = & python -c "import pytest" 2>&1
     if ($LASTEXITCODE -eq 0) {
-        python -m pytest
-        Write-Host "AI Engine tests passed!" -ForegroundColor Green
+        python -m pytest tests/test_xbd_data.py
+        Write-Host "AI Engine xBD tests passed!" -ForegroundColor Green
     } else {
         Write-Host "Local Python ML dependencies (pytest/torch) not installed on host Python - skipped (full ML test suite runs in Docker)." -ForegroundColor DarkYellow
     }

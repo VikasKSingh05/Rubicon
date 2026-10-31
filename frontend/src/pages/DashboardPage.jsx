@@ -50,6 +50,18 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleSeedXbd() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      await api("/assessments/seed", { method: "POST" });
+      await load();
+    } catch (err) {
+      setLoadError(err.message);
+      setLoading(false);
+    }
+  }
+
   function handleSelect(item) {
     setActive(item);
   }
@@ -62,10 +74,11 @@ export default function DashboardPage() {
   return (
     <div className="flex h-full flex-col">
       <TopBar
-          onUpload={() => setUploadOpen(true)}
-          onRefresh={loading ? null : load}
-          refreshing={loading}
-        />
+        onUpload={() => setUploadOpen(true)}
+        onRefresh={loading ? null : load}
+        refreshing={loading}
+        onSeedXbd={handleSeedXbd}
+      />
       <div className="flex min-h-0 flex-1">
         <Sidebar
           assessments={assessments}
