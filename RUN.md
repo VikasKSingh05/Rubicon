@@ -43,20 +43,26 @@ If Docker Desktop is running:
 
 ## 🎤 Method 2: Manual Terminal Run (Interview / Live Demo Step-by-Step)
 
-If an interviewer asks you to run the services step-by-step from scratch in separate terminals, follow these exact steps:
+If an interviewer or teammate clones the repository to run from scratch in separate terminals, follow these exact steps:
+
+### Step 0: Clone the Repository
+```powershell
+git clone -b Vanshika https://github.com/VikasKSingh05/Rubicon.git
+cd Rubicon
+```
 
 ### Pre-requisites Check
 Make sure MongoDB is running:
 ```powershell
 Get-Service -Name MongoDB
 ```
-*(If stopped, start it with `Start-Service MongoDB` in an admin terminal).*
+*(If stopped, start it with `Start-Service MongoDB` in an admin terminal, or `sudo systemctl start mongod` on Linux).*
 
 ### Step 1: Environment File Configuration
 Ensure `.env` exists in the `Rubicon/` root directory:
 ```powershell
 # In Rubicon/
-Copy-Item .env.example .env
+Copy-Item .env.example .env    # (or cp .env.example .env on Linux/macOS)
 ```
 Key settings in `.env`:
 - `MONGO_URI=mongodb://localhost:27017/rubicon`
@@ -71,8 +77,9 @@ Key settings in `.env`:
 Open a terminal in `Rubicon/backend`:
 ```powershell
 cd backend
-npm.cmd install    # (First time only)
-npm.cmd start
+npm.cmd install            # (or npm install on Linux/macOS)
+node scripts/seed_xbd.js   # Seeds the 10 global xBD disaster scenes into MongoDB
+npm.cmd start              # (or npm start)
 ```
 **Expected Output:**
 ```json
