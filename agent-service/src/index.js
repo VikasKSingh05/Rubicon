@@ -18,7 +18,15 @@ app.disable("x-powered-by");
 app.use(requestId);
 app.use(requestLogger(logger));
 app.use(helmet());
-app.use(cors({ origin: (process.env.CORS_ORIGINS || "http://localhost:3000").split(",").map((s) => s.trim()).filter(Boolean) }));
+app.use(
+  cors({
+    origin: (process.env.CORS_ORIGINS || "http://localhost:3000,http://127.0.0.1:3000")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    credentials: true,
+  }),
+);
 app.use(express.json());
 
 app.get("/health", (_req, res) => {

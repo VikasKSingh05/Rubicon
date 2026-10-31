@@ -1,3 +1,4 @@
+
 # ---- Secrets ----
 .env
 .env.*
@@ -29,9 +30,16 @@ checkpoints/
 storage/
 runs/
 
-# E2E fixtures are small, purpose-built assets that CI needs: keep them tracked.
+# E2E fixtures and sample scans are small, purpose-built assets that CI & testers need: keep them tracked.
 !e2e/fixtures/scan/*.tiff
 !e2e/fixtures/scan/*.las
+!sample-scans/*.tiff
+!sample-scans/*.las
+
+# ---- Coverage & test artifacts ----
+coverage/
+.nyc_output/
+*.lcov
 
 # ---- IDE / OS ----
 .vscode/
