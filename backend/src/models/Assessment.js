@@ -47,7 +47,13 @@ const assessmentSchema = new mongoose.Schema(
     class_probs: { type: Map, of: Number, default: null },
     geojson_polygon: { type: Object, default: null },
     buildings_geojson: { type: Object, default: null },
+    cells_geojson: {
+      r9: { type: Object, default: null },
+      r10: { type: Object, default: null },
+    },
+    cells_source: { type: String, enum: ["engine", "synthetic", null], default: null },
     model_version: { type: String, default: null },
+    error: { type: String, default: null },
     preCid: { type: String, default: null },
     postCid: { type: String, default: null },
     hsiCid: { type: String, default: null },
