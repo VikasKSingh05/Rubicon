@@ -13,14 +13,20 @@ function Row({ label, value }) {
 }
 
 function DownloadRow({ assessmentId, kind, filename }) {
-  const defaultName = kind === "hsi" ? "HSI data" : "LiDAR data";
+  const defaultLabels = {
+    pre: "Pre-Disaster Satellite",
+    post: "Post-Disaster Satellite",
+    hsi: "HSI data",
+    lidar: "LiDAR data",
+  };
+  const label = defaultLabels[kind] || kind.toUpperCase();
   return (
     <button
-      onClick={() => downloadBlob(`/files/${assessmentId}/${kind}`, filename || defaultName)}
+      onClick={() => downloadBlob(`/files/${assessmentId}/${kind}`, filename || label)}
       className="flex w-full items-center justify-between rounded-md border border-slate-200 px-2.5 py-1.5 text-xs transition hover:bg-slate-50"
     >
-      <span className="text-slate-700">{kind === "hsi" ? "HSI" : "LiDAR"}</span>
-      <span className="font-medium text-primary">{filename || defaultName}</span>
+      <span className="text-slate-700">{label}</span>
+      <span className="font-medium text-primary">{filename || label}</span>
     </button>
   );
 }
@@ -49,12 +55,14 @@ export function ClassProbBars({ class_probs }) {
 }
 
 function ChainInfo({ a }) {
-  const hasChain = a.hsiCid || a.lidarCid || a.txHash;
+  const hasChain = a.preCid || a.postCid || a.hsiCid || a.lidarCid || a.txHash;
   if (!hasChain) return <p className="text-sm text-slate-500">Pending on-chain proof…</p>;
   return (
     <div>
-      {a.hsiCid && <Row label="HSI CID" value={a.hsiCid} />}
-      {a.lidarCid && <Row label="LiDAR CID" value={a.lidarCid} />}
+      {a.preCid && <Row label="Pre CID" value={a.preCid} />}
+      {a.postCid && <Row label="Post CID" value={a.postCid} />}
+      {!a.preCid && a.hsiCid && <Row label="HSI CID" value={a.hsiCid} />}
+      {!a.postCid && a.lidarCid && <Row label="LiDAR CID" value={a.lidarCid} />}
       {a.txHash && <Row label="Tx hash" value={`${a.txHash.slice(0, 12)}…`} />}
     </div>
   );
@@ -110,12 +118,18 @@ export default function DataPanel({ assessment, onReverify, reverifyPending }) {
         )}
       </section>
 
-      {(a.storage?.hsi || a.storage?.lidar) && (
+      {(a.storage?.pre || a.storage?.post || a.storage?.hsi || a.storage?.lidar) && (
         <section className="rounded-lg border border-slate-200 p-3">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
             Original files
           </h3>
           <div className="space-y-1.5">
+            {a.storage?.pre && (
+              <DownloadRow assessmentId={a.id} kind="pre" filename={a.filename?.pre} />
+            )}
+            {a.storage?.post && (
+              <DownloadRow assessmentId={a.id} kind="post" filename={a.filename?.post} />
+            )}
             {a.storage?.hsi && (
               <DownloadRow assessmentId={a.id} kind="hsi" filename={a.filename?.hsi} />
             )}

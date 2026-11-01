@@ -17,7 +17,7 @@ const logger = makeLogger("upload");
 
 const router = Router();
 
-const ALLOWED_EXTENSIONS = new Set([".tiff", ".tif", ".las", ".laz"]);
+const ALLOWED_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".tiff", ".tif", ".las", ".laz"]);
 const MAX_BYTES = config.maxUploadMb * 1024 * 1024;
 
 function multerErrorToResponse(err, res) {
@@ -25,16 +25,24 @@ function multerErrorToResponse(err, res) {
     return res.status(413).json({ error: `file too large (max ${config.maxUploadMb}MB)` });
   }
   if (err?.message === "unsupported file type") {
-    return res.status(400).json({ error: "only .tiff/.las/.laz files are supported" });
+    return res.status(400).json({ error: "only image files (.png/.jpg/.tif) or point clouds (.las/.laz) are supported" });
   }
   return res.status(400).json({ error: err?.message || "upload failed" });
 }
 
 function validateMagic(buf, kind) {
+  if (!buf || buf.length < 4) return "file payload too small or empty";
   if (kind === "hsi") {
     const little = buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00;
     const big = buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a;
     return little || big ? null : "hsi file is not a valid TIFF";
+  }
+  if (kind === "pre" || kind === "post") {
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+    const isJpg = buf[0] === 0xff && buf[1] === 0xd8;
+    const isTiffLittle = buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00;
+    const isTiffBig = buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a;
+    return isPng || isJpg || isTiffLittle || isTiffBig ? null : `${kind} image must be a valid PNG, JPEG, or TIFF`;
   }
   return buf.subarray(0, 4).toString("latin1") === "LASF"
     ? null
@@ -61,6 +69,8 @@ const upload = multer({
     return cb(null, true);
   },
 }).fields([
+  { name: "pre", maxCount: 1 },
+  { name: "post", maxCount: 1 },
   { name: "hsi", maxCount: 1 },
   { name: "lidar", maxCount: 1 },
 ]);
@@ -83,14 +93,22 @@ async function persistFiles(assessmentId, files) {
 // Amoy tx when the chain layer is configured, deterministic simulated tx
 // otherwise — the simulated path leaves state at "analyzed").
 async function attachProof(assessment, files, prediction) {
-  const [hp, lp] = await Promise.all([
-    pinBuffer(files.hsi.buffer, files.hsi.originalname),
-    pinBuffer(files.lidar.buffer, files.lidar.originalname),
-  ]);
-  assessment.hsiCid = hp.cid;
-  assessment.lidarCid = lp.cid;
+  const primaryA = files.pre || files.hsi;
+  const primaryB = files.post || files.lidar;
 
-  const logged = await logAssessment({ hsiCid: hp.cid, lidarCid: lp.cid, prediction });
+  const [pA, pB] = await Promise.all([
+    pinBuffer(primaryA.buffer, primaryA.originalname),
+    pinBuffer(primaryB.buffer, primaryB.originalname),
+  ]);
+
+  if (files.pre) {
+    assessment.preCid = pA.cid;
+    assessment.postCid = pB.cid;
+  }
+  assessment.hsiCid = pA.cid;
+  assessment.lidarCid = pB.cid;
+
+  const logged = await logAssessment({ hsiCid: pA.cid, lidarCid: pB.cid, prediction });
   assessment.txHash = logged.txHash;
   assessment.chainVerified = logged.chainVerified;
   if (!logged.simulated) {
@@ -100,41 +118,61 @@ async function attachProof(assessment, files, prediction) {
   return assessment;
 }
 
-// POST /upload — accepts multipart fields hsi + lidar, runs the real engine,
-// stores evidence, and pins/proves the upload.
+// POST /upload — accepts multipart fields (pre + post for xBD, or hsi + lidar for legacy),
+// runs the real Siamese U-Net engine, stores evidence, and pins/proves the upload.
 router.post("/", requireAuth, (req, res) => {
   upload(req, res, async (err) => {
     try {
       if (err) return multerErrorToResponse(err, res);
 
+      const pre = req.files?.pre?.[0];
+      const post = req.files?.post?.[0];
       const hsi = req.files?.hsi?.[0];
       const lidar = req.files?.lidar?.[0];
-      if (!hsi || !lidar) {
-        return res.status(400).json({ error: "both hsi and lidar files are required" });
+
+      const isXbd = Boolean(pre && post);
+      const isLegacy = Boolean(hsi && lidar);
+
+      if (!isXbd && !isLegacy) {
+        return res.status(400).json({ error: "Please upload pre and post disaster images (or hsi + lidar)" });
       }
 
-      const hsiBuf = await readFile(hsi.path);
-      const lidarBuf = await readFile(lidar.path);
-      const magicError = validateMagic(hsiBuf, "hsi") || validateMagic(lidarBuf, "lidar");
-      if (magicError) return res.status(400).json({ error: magicError });
+      let files = {};
+      let filenameObj = {};
+
+      if (isXbd) {
+        const preBuf = await readFile(pre.path);
+        const postBuf = await readFile(post.path);
+        const magicErr = validateMagic(preBuf, "pre") || validateMagic(postBuf, "post");
+        if (magicErr) return res.status(400).json({ error: magicErr });
+
+        files = {
+          pre: { buffer: preBuf, originalname: pre.originalname },
+          post: { buffer: postBuf, originalname: post.originalname },
+        };
+        filenameObj = { pre: pre.originalname, post: post.originalname };
+      } else {
+        const hsiBuf = await readFile(hsi.path);
+        const lidarBuf = await readFile(lidar.path);
+        const magicErr = validateMagic(hsiBuf, "hsi") || validateMagic(lidarBuf, "lidar");
+        if (magicErr) return res.status(400).json({ error: magicErr });
+
+        files = {
+          hsi: { buffer: hsiBuf, originalname: hsi.originalname },
+          lidar: { buffer: lidarBuf, originalname: lidar.originalname },
+        };
+        filenameObj = { hsi: hsi.originalname, lidar: lidar.originalname };
+      }
 
       const assessment = await Assessment.create({
         user: req.user.sub,
         state: "uploaded",
-        filename: { hsi: hsi.originalname, lidar: lidar.originalname },
+        filename: filenameObj,
         timestamps: { uploaded: new Date() },
       });
 
       try {
-        assessment.storage = await persistFiles(assessment._id.toString(), {
-          hsi: { buffer: hsiBuf, originalname: hsi.originalname },
-          lidar: { buffer: lidarBuf, originalname: lidar.originalname },
-        });
-
-        const files = {
-          hsi: { buffer: hsiBuf, originalname: hsi.originalname },
-          lidar: { buffer: lidarBuf, originalname: lidar.originalname },
-        };
+        assessment.storage = await persistFiles(assessment._id.toString(), files);
 
         transition(assessment, "analyzing");
         const result = await runInference(files, { requestId: req.requestId });
@@ -144,6 +182,7 @@ router.post("/", requireAuth, (req, res) => {
         assessment.confidence = result.confidence;
         assessment.class_probs = result.class_probs;
         assessment.geojson_polygon = result.geojson_polygon;
+        assessment.buildings_geojson = result.buildings_geojson;
         assessment.model_version = result.model_version;
 
         await attachProof(assessment, files, result.prediction);

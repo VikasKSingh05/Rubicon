@@ -29,7 +29,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler
 try:
     from torch.utils.tensorboard import SummaryWriter
     _TB = True
@@ -38,24 +37,32 @@ except ImportError:
 
 from ..data.splits import load_or_create_splits
 from ..data.synthetic import generate_synthetic_dataset
-from ..data.dataset import XBDDataset, get_weighted_sampler
+from ..data.dataset import XBDDataset, get_weighted_sampler, compute_norm_stats
 from ..model.siamese_unet import SiameseUNet
 from ..model.losses import RubiconLoss
 from ..model.metrics import XView2Metrics
 from ..model.hardware import detect_hardware, HardwareProfile
+from ..model.checkpoint import DAMAGE_CLASS_NAMES, save_checkpoint
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _build_loader(tiles, profile: HardwareProfile, is_train: bool, cache_dir: Path) -> DataLoader:
+def _build_loader(
+    tiles,
+    profile: HardwareProfile,
+    is_train: bool,
+    cache_dir: Path,
+    norm_stats=None,
+) -> DataLoader:
     """Build a DataLoader from tile metadata and hardware profile."""
     ds = XBDDataset(
         tiles=tiles,
         crop_size=profile.crop_size,
         is_train=is_train,
         cache_dir=cache_dir,
+        norm_stats=norm_stats,
     )
     sampler = get_weighted_sampler(ds) if is_train else None
     return DataLoader(
@@ -93,7 +100,7 @@ def _train_epoch(
     loader: DataLoader,
     criterion: RubiconLoss,
     optimizer: torch.optim.Optimizer,
-    scaler: GradScaler | None,
+    scaler: torch.amp.GradScaler | None,
     device: torch.device,
     profile: HardwareProfile,
     accum_steps: int,
@@ -200,7 +207,7 @@ def _oom_safe_train(
     profile: HardwareProfile,
     criterion: RubiconLoss,
     optimizer: torch.optim.Optimizer,
-    scaler: GradScaler | None,
+    scaler: torch.amp.GradScaler | None,
     device: torch.device,
     accum_steps: int,
     writer,
@@ -274,11 +281,22 @@ def train(
     cache_dir = Path("data/xbd_cache")
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    norm_mean, norm_std = compute_norm_stats(train_tiles)
+    print(f"[INFO] Normalization mean={norm_mean} std={norm_std}")
+
     train_ds = XBDDataset(
-        tiles=train_tiles, crop_size=profile.crop_size, is_train=True, cache_dir=cache_dir
+        tiles=train_tiles,
+        crop_size=profile.crop_size,
+        is_train=True,
+        cache_dir=cache_dir,
+        norm_stats=(norm_mean, norm_std),
     )
     val_ds = XBDDataset(
-        tiles=val_tiles, crop_size=profile.crop_size, is_train=False, cache_dir=cache_dir
+        tiles=val_tiles,
+        crop_size=profile.crop_size,
+        is_train=False,
+        cache_dir=cache_dir,
+        norm_stats=(norm_mean, norm_std),
     )
 
     val_loader = DataLoader(
@@ -306,7 +324,11 @@ def train(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=epochs or 30, eta_min=1e-6
     )
-    scaler = GradScaler() if profile.use_amp else None
+    scaler = (
+        torch.amp.GradScaler("cuda", enabled=True)
+        if (profile.use_amp and device.type == "cuda")
+        else None
+    )
     accum_steps = profile.grad_accum_steps
 
     # ── TensorBoard ───────────────────────────────────────────────────────────
@@ -372,18 +394,35 @@ def train(
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    checkpoint = {
-        "model_version": model_version,
-        "encoder_name": profile.encoder,
-        "num_classes": 5,
-        "damage_classes": ["background", "no-damage", "minor-damage", "major-damage", "destroyed"],
-        "state_dict": model.state_dict(),
-        "profile": profile.name,
-    }
-    torch.save(checkpoint, out_dir / "siamese_unet.pt")
+    checkpoint = save_checkpoint(
+        out_dir / "siamese_unet.pt",
+        model,
+        model_version=model_version,
+        encoder_name=profile.encoder,
+        num_classes=5,
+        crop_size=train_ds.crop_size or profile.crop_size,
+        norm_mean=norm_mean,
+        norm_std=norm_std,
+        damage_classes=DAMAGE_CLASS_NAMES,
+        epoch=len(history) - 1 if history else None,
+        metrics={
+            "best_val_xview2_score": best_score,
+            "final_val": final_metrics,
+            "history": history,
+        },
+        hardware_profile=profile.name,
+        extra_config={
+            "source_split": splits.get("metadata", {}).get("source_split"),
+            "train_events": splits.get("metadata", {}).get("train_events", []),
+            "val_events": splits.get("metadata", {}).get("val_events", []),
+            "train_tiles": len(train_ds),
+            "val_tiles": len(val_ds),
+        },
+    )
 
     metrics_out = {
         "model_version": model_version,
+        "checkpoint_hash": checkpoint["state_dict_hash"],
         "best_val_xview2_score": best_score,
         "final_val": final_metrics,
         "history": history,

@@ -56,7 +56,7 @@ function makeHexagon(centerLng, centerLat, radiusMeters) {
 }
 
 function generateCellsForAssessment(doc) {
-  const center = bboxCenter(doc.geojson_polygon) || { lng: -95.3698, lat: 29.7604 };
+  const center = bboxCenter(doc.geojson_polygon) || { lng: -122.71, lat: 38.44 };
   const baseSeverity = doc.severity || "none";
   const sevMap = {
     severe: ["RED", "ORANGE", "YELLOW"],
@@ -136,6 +136,17 @@ router.get(
       assessmentId: doc._id.toString(),
       cells: cellsGeoJson,
     });
+  }),
+);
+
+// POST /assessments/seed — Seeds xBD trained disaster scenes for current user
+router.post(
+  "/seed",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { seedXbdAssessments } = await import("../../scripts/seed_xbd.js");
+    const count = await seedXbdAssessments(req.user.sub);
+    return res.json({ ok: true, seeded: count });
   }),
 );
 

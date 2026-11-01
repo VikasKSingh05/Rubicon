@@ -161,3 +161,38 @@ All **168** tests across the monorepo pass cleanly:
 - **`frontend`**: 33 passed (`vitest` in 9.3s), production build verified (`vite build` in 5.2s)
 
 **Grand Total:** 168/168 tests green (100% pass rate). All phases verified and operational.
+
+---
+
+## 10. Addendum: Real xBD Data Verification (2026-11-01)
+
+The xBD pipeline was re-validated against the real archives in `data/xbd` (not synthetic):
+
+- `train/`: 2,799 pre/post pairs, 10 events; `hold/`: 933 pairs, 10 events. `data/` is gitignored and nothing under it is tracked.
+- Event-disjoint split from `train/`: 8 train events / 2,565 tiles, 2 validation events (`mexico-earthquake`, `palu-tsunami`) / 234 tiles (8.36%). Zero event overlap.
+- Mask parity vs shipped `targets/` on 12 tiles: localization 99.9994%, damage 99.9447%. Hold split: 99.6569% / 99.6439% on 6 tiles.
+- `hold/` shares event names with `train/`; it is a tile-level holdout only, not an unseen-disaster metric.
+- Parser fix: WKT coordinates are rounded rather than truncated (damage agreement rose from ~99.58% to ~99.94–99.98%); localization is taken from the pre-disaster label, damage from the post-disaster label.
+- `ai-engine` test suite after the fixes: **67 passed** (55 previous + 7 targeted split/parser/cache tests + 5 checkpoint-contract tests).
+
+### Checkpoint and training plumbing (Phase 3)
+
+- Training, evaluation, and serving now share `ai_engine.model.checkpoint`:
+  `state_dict` + `config` + `norm_mean`/`norm_std` + `damage_classes` +
+  `state_dict_hash`, loaded with `torch.load(..., weights_only=True)`.
+  Legacy `model_state_dict` checkpoints are upgraded transparently.
+- Serving now normalises inputs with the statistics stored in the checkpoint
+  instead of hard-coded ImageNet values.
+- OOM recovery retries the current batch after reducing the crop size instead
+  of restarting the epoch.
+- Verified real-data CPU smoke run (5 train tiles, 1 epoch): train loss 1.9209,
+  val loss 1.6607, localization F1 0.5574, xView2 0.1672. Evaluation on 2
+  validation tiles: xView2 0.1719, localization F1 0.5731, damage F1 0.0000.
+  **These numbers only validate the pipeline; they are not model quality.**
+- Resume from `checkpoint_last.pt` was exercised successfully (epoch 2 ran from
+  the saved optimizer/scheduler state).
+
+### Known environment blocker (honest status)
+
+The local Python environment currently has `torch 2.10.0+cpu` and `torch.cuda.is_available() == False` despite the RTX 3050 being present. Therefore **no GPU training metrics exist yet**. A CUDA-enabled wheel must be installed (or training run on Kaggle) before any accuracy number can be claimed. CPU-only smoke runs are used to validate the training/eval plumbing, and are labelled as such.
+

@@ -21,7 +21,10 @@ venv/
 
 # ---- Data / weights (large, gitignored per spec) ----
 weights/
-data/
+/data/
+ai-engine/data/
+!ai_engine/data/
+!ai-engine/ai_engine/data/
 checkpoints/
 *.pt
 *.pth
@@ -35,6 +38,10 @@ runs/
 !e2e/fixtures/scan/*.las
 !sample-scans/*.tiff
 !sample-scans/*.las
+
+# Generated qualitative artifacts (regenerate with ai_engine.data.check / eval.py)
+docs/samples/
+docs/results/
 
 # ---- Coverage & test artifacts ----
 coverage/

@@ -10,6 +10,17 @@ export const ASSESSMENT_STATES = [
 ];
 
 export const SEVERITY_BY_PREDICTION = {
+  // xBD / Siamese U-Net classes
+  "No Damage": "none",
+  "no-damage": "none",
+  "Minor Damage": "minor",
+  "minor-damage": "minor",
+  "Major Damage": "major",
+  "major-damage": "major",
+  "Destroyed": "severe",
+  "destroyed": "severe",
+  "un-classified": "none",
+  // Backwards compatibility
   "None": "none",
   "Moderate": "moderate",
   "Severe Collapse": "severe",
@@ -20,10 +31,14 @@ const assessmentSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     state: { type: String, enum: ASSESSMENT_STATES, default: "uploaded" },
     filename: {
+      pre: { type: String, default: null },
+      post: { type: String, default: null },
       hsi: { type: String, default: null },
       lidar: { type: String, default: null },
     },
     storage: {
+      pre: { type: String, default: null },
+      post: { type: String, default: null },
       hsi: { type: String, default: null },
       lidar: { type: String, default: null },
     },
@@ -31,7 +46,10 @@ const assessmentSchema = new mongoose.Schema(
     confidence: { type: Number, default: null },
     class_probs: { type: Map, of: Number, default: null },
     geojson_polygon: { type: Object, default: null },
+    buildings_geojson: { type: Object, default: null },
     model_version: { type: String, default: null },
+    preCid: { type: String, default: null },
+    postCid: { type: String, default: null },
     hsiCid: { type: String, default: null },
     lidarCid: { type: String, default: null },
     txHash: { type: String, default: null },

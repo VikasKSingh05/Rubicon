@@ -1,62 +1,88 @@
-# Rubicon ai-engine
+# Rubicon ai-engine — xBD Dual-Task Siamese U-Net
 
-Staged plan:
-- Phase 0: stub returning the exact `/predict` contract shape.
-- Phase 2: preprocessing pipeline (HSI PCA, LiDAR DEM, alignment, patchify).
-- Phase 3: real Mamba–Transformer fusion model swapped in with zero contract change.
+The Rubicon AI Engine is a deep learning service for automated post-disaster building damage assessment using pre- and post-disaster high-resolution optical satellite imagery from the **xBD (xView2) dataset**.
 
-## Phase 2 — Houston 2013 preprocessing
+## 🏗️ Model Architecture
 
-```
-pip install -r requirements.txt
-python scripts/download_houston2013.py          # fetch HSI + DSM + GT into data/houston2013/
-python -m src.preprocessing.dataset --config configs/phase2.yaml
-jupyter lab notebooks/eda.ipynb                 # exploratory checks
-python -m pytest
-```
+The architecture implements a **Dual-Task Siamese U-Net** based on the research specification:
+1. **Weight-Shared Siamese Encoders**: A shared convolutional backbone (ResNet-18 / ResNet-34) processes the pre-disaster and post-disaster images in parallel to extract multiscale feature representations:
+   - $F_{\text{pre}} = \text{Encoder}(I_{\text{pre}})$
+   - $F_{\text{post}} = \text{Encoder}(I_{\text{post}})$
+2. **Feature Fusion Layer**: Fuses pre and post feature maps via concatenation and absolute difference:
+   - $F_{\text{fused}} = [F_{\text{pre}} \,\|\, F_{\text{post}} \,\|\, |F_{\text{post}} - F_{\text{pre}}|]$
+3. **Dual-Task Decoders**:
+   - **Localization Decoder**: Segments all building footprints from pre-disaster features (Binary Cross-Entropy + Dice Loss).
+   - **Classification Decoder**: Classifies 4-tier damage severity on post-disaster features (Weighted Cross-Entropy / Focal Loss):
+     - `0: No Damage`
+     - `1: Minor Damage`
+     - `2: Major Damage`
+     - `3: Destroyed`
+4. **Polygon Aggregator**: Masks classification output with predicted building footprints and aggregates per-building polygon damage confidence distributions.
 
-Pipeline (`src/preprocessing/`):
+---
 
-| module | role |
-|---|---|
-| `load_hsi.py` | read the 144-band cube, normalize, PCA to ~99% variance |
-| `load_lidar.py` | rasterize raw `.las` (laspy) or read a pre-rasterized DSM |
-| `align.py` | reproject the DEM onto the HSI grid |
-| `patchify.py` | sliding-window tiling into 32x32 patches, majority-label |
-| `dataset.py` | orchestrator: leak-free PCA + DEM stats (train only), 70/15/15 stratified split, saves `.npz` + pickled PCA for inference |
-
-Datasets are gitignored (`data/`). Damage classes are a land-cover proxy —
-see `src/preprocessing/__init__.py`.
-
-## Phase 3 — Mamba-Transformer fusion model
+## 📁 Directory Structure
 
 ```
-python -m src.training.train --config configs/phase3.yaml   # reads the Phase 2 npz
-python -m pytest
+ai-engine/
+├── ai_engine/
+│   ├── data/
+│   │   ├── dataset.py        # PyTorch Dataset for xBD pre/post pairs
+│   │   ├── parser.py         # xBD JSON parser, GeoJSON/WKT polygon rasterization
+│   │   ├── splits.py         # Disaster-event disjoint train/val/test splits
+│   │   └── synthetic.py      # Synthetic xBD dataset generator for local dev & testing
+│   ├── model/
+│   │   ├── siamese_unet.py   # Dual-Task Siamese U-Net model definition
+│   │   ├── losses.py         # Joint localization (BCE+Dice) & damage (Focal) loss
+│   │   ├── metrics.py        # xView2 F1 macro competition metrics
+│   │   ├── aggregator.py     # Polygon footprint damage aggregation
+│   │   ├── sat_serving.py    # Satellite inference runner
+│   │   └── hardware.py       # Hardware auto-detection (MPS/CUDA/CPU/RAM)
+│   ├── training/
+│   │   └── train.py          # Training loop with AMP, checkpointing & logging
+│   └── serve.py              # FastAPI server implementing the `/predict` contract
+├── scripts/
+│   ├── download_xbd.py       # xBD dataset access guide & synthetic generator
+│   ├── eda_xbd.py            # Comprehensive xBD Exploratory Data Analysis
+│   └── tune_hyperparams.py   # Hyperparameter tuning search for Siamese U-Net
+├── notebooks/
+│   └── eda.ipynb             # Interactive Jupyter EDA notebook with visualizations
+└── tests/
+    └── test_xbd_data.py      # Unit & integration tests for xBD parser, dataset & splits
 ```
 
-| module | role |
-|---|---|
-| `src/model/mamba.py` | pure-PyTorch selective SSM (CPU-portable Mamba layer) |
-| `src/model/fusion.py` | HSI branch (conv stem -> Mamba+Transformer tokens) + LiDAR CNN branch, late fusion head |
-| `src/model/baseline.py` | fallback CNN baseline (report comparison / constrained environments) |
-| `src/model/factory.py` | `kind: mamba_transformer \| baseline_cnn` from config |
-| `src/training/train.py` | CLI: train on the npz, write `data/models/{model.pt,metrics.json,pca.pkl}` |
-| `src/model/serving.py` | uploaded HSI/LiDAR files -> aligned patches -> contract response |
+---
 
-`data/models/` is gitignored and mounted into the ai-engine container
-(`docker-compose.yml`), so a trained artifact is picked up at startup:
-`/health` reports `model_loaded`. Without files or an artifact, `/predict`
-returns the original stub body so earlier phases keep working.
+## ⚡ Quick Start
 
-The Mamba-Transformer selection is a per-scene aggregation: per-patch
-severity probabilities are averaged into `class_probs`, `prediction` is the
-argmax, `confidence` the mean probability of that class, and `geojson_polygon`
-is the envelope of affected (non-"None") patches georeferenced to lon/lat.
+### 1. Generate Synthetic Data
+```bash
+python scripts/download_xbd.py --synthetic --num-pairs 10
+```
 
-## Inference
+### 2. Run Exploratory Data Analysis (EDA)
+```bash
+# Terminal summary
+python scripts/eda_xbd.py --synthetic
 
-`src/inference.py` serves `/predict`. With a trained artifact at
-`RUBICON_MODEL_DIR` (default `./data/models`), it accepts multipart `hsi`
-(.tif/.tiff) and `lidar` (.tif/.las) files and runs the real fusion model;
-otherwise it falls back to the Phase 0 stub. The contract shape never changes.
+# Or launch Jupyter notebook
+jupyter lab notebooks/eda.ipynb
+```
+
+### 3. Hyperparameter Tuning
+```bash
+# Fast dry-run
+python scripts/tune_hyperparams.py --synthetic --trials 5 --dry-run
+```
+
+### 4. Run Tests
+```bash
+pytest tests/test_xbd_data.py
+```
+
+### 5. Start Inference Server
+```bash
+python -m uvicorn ai_engine.serve:app --host 0.0.0.0 --port 8000
+```
+- Health Check: `GET http://localhost:8000/health`
+- Predict API: `POST http://localhost:8000/predict` (multipart `pre_image` and `post_image`)

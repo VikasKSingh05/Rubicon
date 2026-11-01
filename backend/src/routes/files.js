@@ -7,7 +7,7 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import Assessment from "../models/Assessment.js";
 import { config } from "../config.js";
 
-const KINDS = new Set(["hsi", "lidar"]);
+const KINDS = new Set(["pre", "post", "hsi", "lidar"]);
 
 // Strict 24-hex guard: anything else must never reach mongoose, whose
 // ObjectId cast throws (BSONError) on malformed input.
@@ -16,6 +16,8 @@ const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 const router = Router();
 
 function kindToType(kind) {
+  if (kind === "pre") return { mime: "image/png", label: "Pre-Disaster Satellite" };
+  if (kind === "post") return { mime: "image/png", label: "Post-Disaster Satellite" };
   return kind === "hsi" ? { mime: "image/tiff", label: "HSI" } : { mime: "application/octet-stream", label: "LiDAR" };
 }
 

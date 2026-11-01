@@ -18,3 +18,9 @@ body {
   width: 100%;
   background: #cbd5e1;
 }
+
+/* Offset Leaflet zoom controls so they never collide with the floating top toolbar */
+.leaflet-top.leaflet-left {
+  top: 54px;
+  left: 12px;
+}

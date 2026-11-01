@@ -1,15 +1,32 @@
 """Unit tests for the Rubicon xBD data pipeline."""
+import copy
 import json
+import os
 import tempfile
+import time
 from pathlib import Path
 import numpy as np
+import cv2
 import pytest
 import torch
 
-from ai_engine.data.parser import parse_xbd_label, cache_tile_masks, DAMAGE_MAP
-from ai_engine.data.splits import create_event_splits, discover_xbd_tiles
+from ai_engine.data.parser import (
+    DAMAGE_MAP,
+    cache_tile_masks,
+    get_or_create_masks,
+    parse_xbd_label,
+    tile_has_severe_damage,
+)
+from ai_engine.data.splits import (
+    DEFAULT_VAL_EVENTS,
+    create_event_splits,
+    discover_xbd_tiles,
+    load_or_create_splits,
+    resolve_source_root,
+    validate_splits,
+)
 from ai_engine.data.synthetic import generate_synthetic_dataset
-from ai_engine.data.dataset import XBDDataset, get_weighted_sampler
+from ai_engine.data.dataset import XBDDataset, compute_norm_stats, get_weighted_sampler
 
 
 @pytest.fixture(scope="module")
@@ -137,3 +154,157 @@ def test_weighted_sampler_construction(sample_dataset, tmp_path):
 
     assert sampler is not None
     assert len(sampler) == len(dataset)
+
+
+# ── targeted tests for the event-split / mask contract ───────────────
+
+_PRE_POLY = "POLYGON ((100 100, 200 100, 200 200, 100 200, 100 100))"
+_POST_POLY = "POLYGON ((600 600, 700 600, 700 700, 600 700, 600 600))"
+
+
+def _write_tile(root, tile_id, pre_polys, post_polys):
+    """Create one minimal xBD tile (images + labels) under *root*."""
+    root = Path(root)
+    img_dir = root / "images"
+    lbl_dir = root / "labels"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    lbl_dir.mkdir(parents=True, exist_ok=True)
+
+    img = np.zeros((1024, 1024, 3), dtype=np.uint8)
+    cv2.imwrite(str(img_dir / f"{tile_id}_pre_disaster.png"), img)
+    cv2.imwrite(str(img_dir / f"{tile_id}_post_disaster.png"), img)
+
+    for suffix, polys in (("pre", pre_polys), ("post", post_polys)):
+        features = [
+            {"wkt": wkt, "properties": {"uid": f"b{idx}", "subtype": subtype,
+                                        "feature_type": "building"}}
+            for idx, (wkt, subtype) in enumerate(polys)
+        ]
+        label = {"features": {"xy": features},
+                 "metadata": {"height": 1024, "width": 1024}}
+        (lbl_dir / f"{tile_id}_{suffix}_disaster.json").write_text(
+            json.dumps(label), encoding="utf-8"
+        )
+
+    tiles = discover_xbd_tiles(root)
+    assert tiles, f"tile {tile_id} was not discovered under {root}"
+    return tiles[0]
+
+
+def test_localization_comes_from_pre_label(tmp_path):
+    """Buildings present only pre-disaster must still be localised."""
+    tile = _write_tile(
+        tmp_path / "a",
+        "test-event_00000000",
+        [(_PRE_POLY, "un-classified")],
+        [(_POST_POLY, "destroyed")],
+    )
+    loc, dmg = get_or_create_masks(
+        tile_id=tile["tile_id"],
+        pre_json_path=tile["pre_label"],
+        post_json_path=tile["post_label"],
+        cache_dir=tmp_path / "cache",
+    )
+
+    assert loc[150, 150] == 1, "pre-only building missing from localization mask"
+    assert dmg[150, 150] == 0, "pre-only building must not receive a damage class"
+    assert dmg[650, 650] == DAMAGE_MAP["destroyed"]
+    assert loc[650, 650] == 1, "damage pixels must be localised"
+
+
+def test_mask_cache_invalidated_when_label_changes(tmp_path):
+    """Editing a source label must invalidate the cached mask PNGs."""
+    tile = _write_tile(
+        tmp_path / "a",
+        "test-event_00000000",
+        [(_PRE_POLY, "un-classified")],
+        [(_POST_POLY, "destroyed")],
+    )
+    cache_dir = tmp_path / "cache"
+    loc_first, _ = get_or_create_masks(
+        tile["tile_id"], tile["pre_label"], tile["post_label"], cache_dir
+    )
+    assert loc_first[150, 150] == 1
+
+    pre_label = Path(tile["pre_label"])
+    pre_label.write_text(json.dumps({"features": {"xy": []}}), encoding="utf-8")
+    future = time.time() + 10
+    os.utime(pre_label, (future, future))
+
+    loc_second, _ = get_or_create_masks(
+        tile["tile_id"], tile["pre_label"], tile["post_label"], cache_dir
+    )
+    assert loc_second[150, 150] == 0, "stale cache was not invalidated"
+
+
+def test_tile_has_severe_damage(tmp_path):
+    severe = _write_tile(
+        tmp_path / "severe", "test-event_00000000",
+        [(_PRE_POLY, "un-classified")], [(_POST_POLY, "destroyed")],
+    )
+    mild = _write_tile(
+        tmp_path / "mild", "test-event_00000000",
+        [(_PRE_POLY, "un-classified")], [(_POST_POLY, "no-damage")],
+    )
+    assert tile_has_severe_damage(severe["post_label"])
+    assert not tile_has_severe_damage(mild["post_label"])
+
+
+def test_validate_splits_rejects_non_event_manifests(sample_dataset, tmp_path):
+    tiles = discover_xbd_tiles(sample_dataset)
+    splits = create_event_splits(tiles, output_path=tmp_path / "splits.json")
+    assert validate_splits(splits)
+
+    random_split = {
+        "metadata": {"split_mode": "random", "event_disjoint": False},
+        "train": tiles,
+        "val": [],
+    }
+    assert not validate_splits(random_split)
+
+    leaking = copy.deepcopy(splits)
+    leaking["val"] = list(leaking["train"])
+    assert not validate_splits(leaking), "tile-level leakage must be rejected"
+
+    other_source = copy.deepcopy(splits)
+    other_source["metadata"]["source_split"] = "hold"
+    assert not validate_splits(other_source, source_split="train")
+
+
+def test_default_validation_events(sample_dataset):
+    tiles = discover_xbd_tiles(sample_dataset)
+    splits = create_event_splits(tiles)
+    assert set(splits["metadata"]["val_events"]) == set(DEFAULT_VAL_EVENTS)
+    assert not set(splits["metadata"]["train_events"]) & set(DEFAULT_VAL_EVENTS)
+
+
+def test_train_hold_layout_discovery(tmp_path):
+    """``train/`` must be the primary source when both splits exist."""
+    xbd_root = tmp_path / "xbd"
+    generate_synthetic_dataset(xbd_root / "train", tiles_per_event=2, n_events=3)
+    generate_synthetic_dataset(xbd_root / "hold", tiles_per_event=1, n_events=3)
+
+    source_root, source_name = resolve_source_root(xbd_root)
+    assert source_name == "train"
+    assert source_root == xbd_root / "train"
+
+    splits = load_or_create_splits(xbd_root)
+    assert splits["metadata"]["source_split"] == "train"
+    assert (xbd_root / "splits_train.json").exists()
+    assert len(splits["train"]) + len(splits["val"]) == 6
+    assert validate_splits(splits, source_split="train")
+
+    hold_tiles = discover_xbd_tiles(xbd_root / "hold")
+    assert len(hold_tiles) == 3
+
+
+def test_compute_norm_stats(sample_dataset):
+    tiles = discover_xbd_tiles(sample_dataset)
+    mean, std = compute_norm_stats(tiles, max_tiles=2, sample_size=32)
+    assert len(mean) == 3 and len(std) == 3
+    assert all(0.0 <= m <= 1.0 for m in mean)
+    assert all(s > 0.0 for s in std)
+
+    empty_mean, empty_std = compute_norm_stats([])
+    assert empty_mean == [0.485, 0.456, 0.406]
+    assert empty_std == [0.229, 0.224, 0.225]

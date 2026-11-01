@@ -1,6 +1,6 @@
 # Rubicon — Comprehensive System Architecture, Codebase Blueprint & Viva Guide
 
-> **Project Mission**: Autonomous Multimodal Disaster Assessment with an Immutable Proof System. Rubicon ingests airborne/satellite hyperspectral (HSI) and LiDAR point clouds, performs damage severity classification via a hybrid Mamba–Transformer deep learning fusion architecture, pins raw sensory evidence to IPFS, records cryptographic proofs on the Polygon Amoy blockchain, renders interactive spatial GIS damage polygons on a Leaflet map, and provides a tool-grounded AI assistant for situational command.
+> **Project Mission**: Autonomous Disaster Assessment with an Immutable Proof System. Rubicon ingests pre-disaster and post-disaster optical satellite image pairs from the benchmark **xBD (xView2)** dataset, performs building localization and 4-tier damage severity classification via a **Dual-Task Siamese U-Net (ResNet-34 shared weights)** deep learning architecture, pins raw sensory evidence to IPFS, records cryptographic proofs on the Polygon Amoy blockchain, renders interactive spatial GIS damage polygons on a Leaflet map, and provides a tool-grounded AI assistant for situational command.
 
 ---
 
@@ -27,13 +27,13 @@
 ## 1. Core Problem & Value Proposition
 
 ### The Problem
-During catastrophic natural disasters (hurricanes, earthquakes, flash floods), emergency responders and insurance assessors face three critical hurdles:
-1. **Sensor Limitations**: Standard RGB imagery fails to distinguish structural debris from surface discoloration (e.g., mud on an intact roof looks identical to a collapsed roof).
+During catastrophic natural disasters (hurricanes, earthquakes, wildfires, flash floods), emergency responders and insurance assessors face three critical hurdles:
+1. **Change Detection Complexity**: Standard post-event photography alone cannot identify collapsed or destroyed structures without an accurate pre-disaster reference baseline footprint.
 2. **Data Tampering & Fraud**: Post-disaster relief funds and insurance claims are frequently subjected to fraud, image fabrication, or retroactive metadata alterations.
 3. **Fragmented Intelligence**: Decision-makers must manually correlate GIS map coordinates, sensory files, and statistical reports under severe time constraints.
 
 ### The Rubicon Solution
-1. **Multimodal Fusion**: Combines **Hyperspectral Imagery (HSI)** (capturing hundreds of narrow contiguous spectral bands that reveal material composition) with **LiDAR** (capturing 3D point cloud elevation and structural volume collapse).
+1. **Dual-Task Siamese U-Net**: Ingests paired pre- and post-disaster optical satellite tiles, sharing weights across a ResNet-34 encoder, fusing multi-scale feature differences, and using dual decoder heads to simultaneously localize building footprints and classify damage into 4 discrete xBD severity levels (`No Damage`, `Minor Damage`, `Major Damage`, `Destroyed`).
 2. **Immutable Proof Chain**: Raw sensory files are content-addressed into IPFS CIDs. A cryptographic event is logged to the **Polygon Amoy testnet** using the `PramaanLedger` smart contract. Evidence cannot be forged, manipulated, or backdated.
 3. **Tool-Grounded Conversational Agent**: An AI agent queries live MongoDB data via strict function calling, answering operational queries without hallucination.
 
@@ -68,13 +68,13 @@ flowchart TD
 ```
 
 ### The 7-Step Lifecycle of a Disaster Assessment
-1. **Upload & Magic-Byte Validation**: User submits an HSI file (`.tif`/`.tiff`) and LiDAR file (`.las`/`.laz`). The backend inspects the first 4 bytes (magic bytes: `II*\0` or `MM\0*` for TIFF, `LASF` for LiDAR) to verify authenticity before processing.
+1. **Upload & Magic-Byte Validation**: User submits paired pre-disaster and post-disaster optical satellite scans (`.png`/`.jpg`/`.tif`). The backend inspects the header magic bytes (e.g. PNG signature `\x89PNG`, JPEG `\xff\xd8`, or TIFF `II*\0` / `MM\0*`) to verify authenticity before processing.
 2. **File Spooling**: Files are streamed to a temporary directory (`os.tmpdir()/rubicon-*`) rather than held in RAM, preventing memory starvation during concurrent uploads.
-3. **Inference Pipeline**: The backend sends multipart buffers to the FastAPI AI Engine (`http://localhost:8000/predict`). If unreachable, it triggers `stubPredict()`.
-4. **H3 Spatial Indexing & GeoJSON Formulation**: The inference service maps pixel predictions to real-world WGS84 latitude/longitude bounding polygons and generates Uber H3 hexagonal spatial cells.
-5. **IPFS Content-Addressing**: Cryptographic CIDv0 identifiers (`Qm...`) are computed via SHA-256 multihash and pinned to Pinata (or calculated locally if offline).
-6. **On-Chain Notarization**: The backend signs an Ethereum transaction invoking `PramaanLedger.logAssessment(hsiCid, lidarCid, prediction)` on Polygon Amoy.
-7. **Storage & Visualization**: The complete assessment record is persisted in MongoDB. The frontend dashboard updates its Leaflet map, drawing color-coded damage polygons (`None` = green, `Moderate` = yellow, `Severe Collapse` = red).
+3. **Inference Pipeline**: The backend routes the pre/post image pair to the Siamese U-Net inference engine (`/infer/satellite`). If unreachable, it triggers `stubPredict()` returning xBD class distributions.
+4. **H3 Spatial Indexing & GeoJSON Formulation**: The inference service generates building polygons and maps damage distributions to WGS84 latitude/longitude bounding polygons and Uber H3 hexagonal spatial cells.
+5. **IPFS Content-Addressing**: Cryptographic CIDv0 identifiers (`Qm...`) are computed via SHA-256 multihash for both pre- and post-disaster images and pinned to Pinata (or calculated locally if offline).
+6. **On-Chain Notarization**: The backend signs an Ethereum transaction invoking `PramaanLedger.logAssessment(preCid, postCid, prediction)` on Polygon Amoy.
+7. **Storage & Visualization**: The complete assessment record is persisted in MongoDB. The frontend dashboard updates its Leaflet map, drawing color-coded damage polygons (`No Damage` = green, `Minor Damage` = yellow, `Major Damage` = orange, `Destroyed` = red).
 
 ---
 
@@ -84,12 +84,12 @@ flowchart TD
 * **[`package.json`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/package.json)**: Top-level manifest defining end-to-end smoke harness scripts (`e2e` and `e2e:setup`).
 * **[`docker-compose.yml`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/docker-compose.yml)**: Multi-container orchestration definition for 5 services: `mongodb` (7.0.14), `ai-engine`, `ai-engine-satellite`, `agent-service`, `backend`, and `frontend`, with internal Docker DNS networking and health check dependencies.
 * **[`.env.example`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/.env.example) / [`.env`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/.env)**: Centralized environment template with configurations for MongoDB connection URI, JWT secrets, Pinata JWT, Polygon RPC URL, contract addresses, and LLM provider credentials.
-* **[`train.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/train.py)**: Standalone Python training pipeline for the Mamba-Transformer model on the Houston 2013 multimodal dataset.
-* **[`eval.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/eval.py)**: Model evaluation script calculating Overall Accuracy (OA), Average Accuracy (AA), and Cohen's Kappa coefficient ($\kappa$).
+* **[`train.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/train.py)**: Standalone Python training pipeline for the Dual-Task Siamese U-Net model on the xBD dataset (featuring auto-hardware profiling, AMP fp16, Cosine schedule, and automatic CUDA OOM crop-size halving).
+* **[`eval.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/eval.py)**: Model evaluation script calculating xView2 building localization $F_1$, damage classification $F_1$, and harmonic mean score.
 * **[`scripts/serve.ps1`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/scripts/serve.ps1)**: Windows PowerShell runner script supporting `-Local` (spawns 4 dedicated PowerShell windows with execution policy bypass) or default Docker Compose.
 * **[`scripts/setup.ps1`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/scripts/setup.ps1)**: Automated dependency installer invoking `npm.cmd install` across all Node services and handling Python pip installation gracefully.
 * **[`scripts/test.ps1`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/scripts/test.ps1)**: Comprehensive multi-service test runner executing backend tests, agent-service tests, frontend Vitest tests, and AI Engine pytest.
-* **[`sample-scans/`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/sample-scans)**: Staged valid test scans (`hsi.tiff` and `lidar.las`) formatted with valid magic bytes for immediate testing in the UI.
+* **[`sample-scans/`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/sample-scans)**: Staged valid test scans formatted with valid magic bytes for immediate testing in the UI.
 
 ---
 
@@ -195,74 +195,133 @@ flowchart TD
 
 ## 4. The Machine Learning Deep Dive
 
-### 4.1 Datasets: Houston 2013 vs. xBD (xView2)
+### 4.1 Datasets: xBD (xView2) Core Architecture vs. Airborne Sensors
 
-Rubicon integrates **two distinct datasets** because real-world disaster management requires multiple tiers of resolution and modality:
+Rubicon's primary damage triage pipeline is built on the **xBD (xView2)** benchmark dataset, utilizing pre-disaster and post-disaster optical satellite pairs:
 
-| Metric | Houston 2013 (IEEE GRSS) | xBD / xView2 (DIUx / Maxar) |
+| Metric | xBD / xView2 (Primary Architecture) | Airborne Modality (Supplemental) |
 |---|---|---|
-| **Role in Rubicon** | Core Primary Multimodal Pipeline | Satellite Change Detection Pipeline |
-| **Sensory Modality** | Hyperspectral Imagery (HSI) + Airborne LiDAR | Pre- and Post-Disaster Optical Satellite Imagery |
-| **Spectral Depth** | 144 contiguous bands (380 nm – 1050 nm) + elevation | 3-channel RGB (pre-disaster) + 3-channel RGB (post-disaster) |
-| **Spatial Resolution** | 2.5 m Ground Sample Distance (GSD) | 0.5 m – 0.8 m GSD ($1024 \times 1024$ image tiles) |
-| **Target Classes** | 3 Classes: `None`, `Moderate`, `Severe Collapse` | 4 Classes: `No Damage`, `Minor Damage`, `Major Damage`, `Destroyed` |
-| **Input Files** | `.tif`/`.tiff` (HSI) + `.las`/`.laz` (LiDAR) | `.png`/`.jpg` (Pre-disaster) + `.png`/`.jpg` (Post-disaster) |
-| **Service Endpoint** | `POST /predict` (`ai-engine` port 8000) | `POST /satellite` / `POST /infer/satellite` (port 8002) |
+| **Role in Rubicon** | **Core Primary Damage Assessment Pipeline** | Supplemental Airborne Sensor Pipeline |
+| **Sensory Modality** | Pre- and Post-Disaster Optical Satellite Imagery | Hyperspectral Imagery (HSI) + Airborne LiDAR |
+| **Spectral Depth** | 3-channel RGB (pre-disaster) + 3-channel RGB (post-disaster) | 144 contiguous bands (380 nm – 1050 nm) + elevation |
+| **Spatial Resolution** | 0.5 m – 0.8 m GSD ($1024 \times 1024$ image tiles) | 2.5 m Ground Sample Distance (GSD) |
+| **Target Classes** | 4 Classes: `No Damage`, `Minor Damage`, `Major Damage`, `Destroyed` | 3 Classes: `None`, `Moderate`, `Severe Collapse` |
+| **Input Files** | `.png`/`.jpg`/`.tif` (Pre-disaster) + `.png`/`.jpg`/`.tif` (Post-disaster) | `.tif`/`.tiff` (HSI) + `.las`/`.laz` (LiDAR) |
+| **Service Endpoint** | `POST /infer/satellite` & `POST /upload` | `POST /predict` (legacy fallback) |
 
 ---
 
-### 4.2 Architectures: Mamba-Transformer vs. Siamese U-Net
+### 4.2 Research Paper Architecture: Dual-Task Siamese U-Net
 
-Rubicon employs **both architectures**, each mathematically matched to its specific sensor modality:
+Rubicon implements the dual-task Siamese U-Net change-detection architecture illustrated in the research paper draft workflow:
 
 ```
-                            ┌──────────────────────────────────────────────┐
-                            │      RUBICON DUAL-TIER ML ARCHITECTURE       │
-                            └──────────────────────────────────────────────┘
-                                                    │
-                ┌───────────────────────────────────┴───────────────────────────────────┐
-                ▼                                                                       ▼
-   TIER 1: MULTIMODAL AIRBORNE STREAM                                      TIER 2: OPTICAL SATELLITE STREAM
-   Dataset: Houston 2013 (HSI + LiDAR)                                     Dataset: xBD / xView2 (Pre + Post)
-   Model: Hybrid Mamba–Transformer Fusion                                  Model: Dual-Branch Siamese U-Net
-   
-   HSI (144 bands) ──> 3D PCA (30 comp) ──> Mamba SSM (S6)                 Pre-Event RGB ──> ResNet34 Encoder ┐ Shared
-                                              │                                                               │ Weights
-   LiDAR (Z/DSM)   ──> 2D CNN Encoder  ──> Spatial Tokens                 Post-Event RGB ──> ResNet34 Encoder ┘
-                                              │                                                  │
-                                              ▼                                                  ▼
-                                    Cross-Attention Fusion                              Feature Difference & Concatenation
-                                    (Q = HSI, K/V = LiDAR)                                       │
-                                              │                                                  ▼
-                                              ▼                                         U-Net Decoder with Skip Connections
-                                    Classification Head (MLP)                                    │
-                                              │                                        ┌─────────┴─────────┐
-                                              ▼                                        ▼                   ▼
-                                    3-Class Damage Polygon                   Building Localization   4-Class Damage Map
-                                    (None / Moderate / Severe)               (Binary Mask)           (None/Minor/Major/Destroyed)
+                            ┌────────────────────────────────────────────────────────┐
+                            │      RUBICON SIAMESE U-NET RESEARCH ARCHITECTURE       │
+                            └────────────────────────────────────────────────────────┘
+                                                        │
+                   ┌────────────────────────────────────┴────────────────────────────────────┐
+                   ▼                                                                         ▼
+     Pre (Satellite Image) [B, 3, H, W]                                        Post (Satellite Image) [B, 3, H, W]
+                   │                                                                         │
+                   ▼                                                                         ▼
+      ┌─────────────────────────┐                                               ┌─────────────────────────┐
+      │  Backbone (ResNet34)    │ ◀ ─ ─ ─ ─ ─ ─  Shared Weights  ─ ─ ─ ─ ─ ─ ─ ─│  Backbone (ResNet34)    │
+      └─────────────────────────┘                                               └─────────────────────────┘
+         │    │    │    │                                                          │    │    │    │
+        F₁   F₂   F₃   F₄                                                         F₁   F₂   F₃   F₄
+         │    │    │    │                                                          │    │    │    │
+         └────┼────┼────┼───────────────────────┐         ┌────────────────────────┘    │    │    │
+              │    │    │                       ▼         ▼                             │    │    │
+              │    │    │                ┌─────────────────────────┐                    │    │    │
+              │    │    │                │  Multi-Scale Feature    │                    │    │    │
+              │    │    │                │  Fusion:                │                    │    │    │
+              │    │    │                │  [F_pre, F_post, |Diff|]│                    │    │    │
+              │    │    │                └─────────────────────────┘                    │    │    │
+              │    │    │                             │                                 │    │    │
+              ▼    ▼    ▼                             ▼                                 ▼    ▼    ▼
+          (Multi-scale skip connections to decoder at stages 1, 2, 3, 4)
+                                                      │
+                                                      ▼
+                                       ┌───────────────────────────────┐
+                                       │   Decoder (U-Net style)       │
+                                       └───────────────────────────────┘
+                                                      │
+                                      ┌───────────────┴───────────────┐
+                                      ▼                               ▼
+                      ┌───────────────────────────────┐ ┌───────────────────────────────┐
+                      │   Building Localization Head  │ │  Damage Classification Head   │
+                      │   (1 Channel, Sigmoid)        │ │  (5 Classes, Softmax)         │
+                      └───────────────────────────────┘ └───────────────────────────────┘
+                                      │                               │
+                                      ▼                               ▼
+                                 L_loc (BCE + Dice)            L_dmg (Weighted CE + Focal)
+                                      │                               │
+                                      └───────────────┬───────────────┘
+                                                      ▼
+                                      L_total = 0.4 * L_loc + 0.6 * L_dmg
 ```
 
-#### Architecture 1: Hybrid Mamba–Transformer Fusion (HSI + LiDAR)
-* **File Location**: `ai-engine/src/model/` (`mamba.py`, `fusion.py`, `serving.py`)
-* **Why Mamba?** Hyperspectral cubes contain 144+ continuous spectral bands. Standard Transformer self-attention scales with quadratic complexity $O(N^2)$ relative to the spectral sequence length. Mamba (Structured State Space Model - S6) processes continuous spectral bands with **linear complexity $O(N)$** and constant memory footprint, selectively propagating absorption features.
-* **Why Cross-Attention?** Rather than naive concatenation, HSI spectral features act as Queries ($Q$), while LiDAR geometric elevation features act as Keys ($K$) and Values ($V$). This enables the model to ask: *"Given this abnormal spectral reflectance (e.g. crushed concrete dust), what is the corresponding 3D elevation delta (structural collapse) at this exact coordinate?"*
+#### Dual Heads and Loss Formulation
+1. **Building Localization Head**:
+   - Single-channel output followed by Sigmoid activation, generating the binary building footprint mask.
+   - Loss function:
+     $$\mathcal{L}_{\text{loc}} = \mathcal{L}_{\text{BCE}} + \mathcal{L}_{\text{Dice}}$$
+2. **Damage Classification Head**:
+   - 5-channel output (Background, No Damage, Minor Damage, Major Damage, Destroyed) with Softmax activation.
+   - Loss function combines class-weighted Cross-Entropy with Focal Loss ($\gamma = 2.0$) to counter severe class imbalance in xBD:
+     $$\mathcal{L}_{\text{dmg}} = \mathcal{L}_{\text{CE, weighted}} + \mathcal{L}_{\text{Focal}}$$
+3. **Joint Multi-Task Objective**:
+   $$\mathcal{L}_{\text{total}} = 0.4 \times \mathcal{L}_{\text{loc}} + 0.6 \times \mathcal{L}_{\text{dmg}}$$
 
-#### Architecture 2: Siamese U-Net (xBD / xView2 Satellite Stream)
-* **File Location**: `ai_engine/model/` (`siamese_unet.py`), `train.py`, `eval.py`, `ai-engine/Dockerfile.satellite`
-* **Why Siamese U-Net?** Disaster damage in optical satellite imagery is a **temporal change detection** problem. You cannot reliably identify building damage from a post-event image alone without knowing the baseline structural footprint before the event.
-* **How It Operates**:
-  1. A shared-weight Siamese encoder (ResNet34 or ResNet18) extracts multi-scale feature hierarchies from both the pre-disaster and post-disaster image.
-  2. The network computes the absolute difference $|F_{\text{pre}} - F_{\text{post}}|$ and concatenates it with the raw representations.
-  3. A two-headed U-Net decoder reconstructs the spatial segmentation:
-     - **Localization Head**: Binary Cross-Entropy (BCE) + Dice loss to segment exact building footprints.
-     - **Classification Head**: Focal Loss + Lovász Softmax to classify damage into the 4 xView2 categories.
+#### Training Pipeline (`train.py` & `ai_engine/model/`):
+- **Hardware Auto-Detection**: Dynamic profiles for Local RTX 3050 (6GB VRAM, crop size 512 with automatic fallback to 384/256 on CUDA OOM), Kaggle GPU (16GB+ VRAM), and CPU fallback.
+- **Optimization**: AdamW with learning rate $3 \times 10^{-4}$, Cosine Annealing with 1-epoch warmup, Automatic Mixed Precision (AMP fp16), channels_last memory format, and gradient clipping (max norm 1.0).
+- **Validation Metric**: Comprehensive xView2 evaluation metric ($F_1^{\text{loc}}$ and harmonic mean $F_1^{\text{dmg}}$ across damage classes).
 
-#### Architecture 3: Stage 2 Drone Triage (`ai_engine/model/drone_serving.py`)
-* Once satellite or HSI models identify damaged H3 hexagonal cells, responders upload ultra-high-resolution drone imagery targeted at individual cells via `POST /drone`.
-* The drone computer vision module classifies structural failure modes:
-  - `roof_collapse`: Dark voids, structural punctures, and planar displacement.
-  - `facade_failure`: Vertical edge energy and shear degradation.
-  - `debris_field`: High-frequency rubble and Laplacian scatter dispersion.
+### 4.3 Exploratory Data Analysis (EDA)
+
+The EDA pipeline (`ai-engine/scripts/eda_xbd.py` and `ai-engine/notebooks/eda.ipynb`) profiles the xBD dataset before training:
+
+| EDA Analysis | What It Computes |
+|---|---|
+| **Class Distribution** | Counts and percentages for No Damage, Minor Damage, Major Damage, Destroyed |
+| **Polygon Area Statistics** | Mean and median building footprint pixel area per damage class |
+| **Spectral Delta Histogram** | Pre vs Post intensity difference `\|I_post - I_pre\|` distribution |
+| **Disaster Event Representation** | Frequency of each disaster event (hurricanes, earthquakes, floods) |
+| **Optimal Class Weights** | Inverse-frequency weights $w_c = \frac{N}{K \cdot N_c}$ for `RubiconLoss` |
+
+Key finding: **No Damage** dominates destroyed/major by roughly **10:1**, empirically justifying Focal Loss ($\gamma = 2.0$) + Weighted Cross-Entropy.
+
+Run the EDA:
+```bash
+# Standalone CLI script
+python ai-engine/scripts/eda_xbd.py --synthetic
+# Or use the Jupyter notebook
+jupyter notebook ai-engine/notebooks/eda.ipynb
+```
+
+### 4.4 Hyperparameter Tuning Pipeline
+
+The tuning script (`ai-engine/scripts/tune_hyperparams.py`) performs randomized grid search over the following search space:
+
+| Hyperparameter | Search Values | Default |
+|---|---|---|
+| **Encoder Backbone** | `resnet18`, `resnet34` | `resnet34` |
+| **Learning Rate** | $1 \times 10^{-4}$, $3 \times 10^{-4}$, $5 \times 10^{-4}$ | $3 \times 10^{-4}$ |
+| **Task Loss $\alpha$ (loc\_weight)** | 0.3, 0.4, 0.5 | 0.4 |
+| **Focal $\gamma$** | 1.5, 2.0, 2.5 | 2.0 |
+| **Weight Decay** | $1 \times 10^{-4}$, $1 \times 10^{-3}$ | $1 \times 10^{-4}$ |
+
+Objective: Maximize validation xView2 metric:
+$$F_1^{\text{total}} = 0.3 \times F_1^{\text{loc}} + 0.7 \times F_1^{\text{dmg}}$$
+
+Run tuning:
+```bash
+python ai-engine/scripts/tune_hyperparams.py --synthetic --trials 5 --dry-run
+```
+
+Results are saved to `runs/hyperparam_tuning_results.json` with a ranked leaderboard of all trials.
 
 ---
 
@@ -277,10 +336,30 @@ Rubicon employs **both architectures**, each mathematically matched to its speci
     "coordinates": [[[-95.35, 29.76], [-95.33, 29.76], [-95.33, 29.78], [-95.35, 29.78], [-95.35, 29.76]]]
   }
   ```
-* **Color Tokens & Styling**:
-  - `None`: Emerald Green (`#22C55E`)
-  - `Moderate`: Amber/Yellow (`#EAB308`)
-  - `Severe Collapse`: Crimson Red (`#DC2626`)
+* **Color Tokens & Styling** (xBD Damage Severity Palette):
+  - `No Damage`: Emerald Green (`#22C55E`)
+  - `Minor Damage`: Yellow (`#EAB308`)
+  - `Major Damage`: Amber (`#F59E0B`)
+  - `Destroyed`: Crimson Red (`#DC2626`)
+  - `On-Chain Verified`: Polygon Violet (`#7C3AED`)
+* **Global Trained xBD Disaster Corpus & GIS Mapping**:
+  - The `MapView` component includes the full geographic mapping for 10 benchmark disaster training regions:
+    1. 🌲 **Santa Rosa Wildfire** (California, USA — 38.44°N, 122.71°W)
+    2. 🌀 **Hurricane Michael** (Mexico Beach, FL, USA — 29.94°N, 85.42°W)
+    3. 🏢 **Mexico City Earthquake** (Puebla, Mexico — 19.34°N, 99.15°W)
+    4. 🌋 **Volcán de Fuego Eruption** (Guatemala — 14.47°N, 90.88°W)
+    5. 🌊 **Palu Earthquake & Tsunami** (Sulawesi, Indonesia — 0.89°S, 119.87°E)
+    6. 🌾 **Midwest River Basin Floods** (Nebraska/Iowa, USA — 41.25°N, 95.93°W)
+    7. 🌪️ **Joplin EF5 Tornado Corridor** (Missouri, USA — 37.08°N, 94.51°W)
+    8. 🔥 **Woolsey Wildfire** (Malibu/LA, California — 34.02°N, 118.77°W)
+    9. 🇦🇺 **Pinery Bushfire** (South Australia — 34.33°S, 138.56°E)
+    10. 🇵🇹 **Pedrógão Grande Wildfire** (Portugal — 39.91°N, 8.14°W)
+* **GIS Concentric Radial Intensity Heatmaps**: Renders 4-tier concentric gradient circles (750m, 480m, 260m, 110m radiuses) centered on disaster epicenters, depicting damage diffusion from the core collapse zone.
+* **Responsive Non-Overlapping Layout Architecture**:
+  - A unified flex overlay bar across the top of the map positions the **xBD Scenes Quick-Jump Pills** on the left and the **GIS Layer Controls** (`All Layers`, `🔥 Heatmap`, `⬡ H3`, `🏢 Footprints`, and `xBD Data`) on the right, eliminating header crowding and control collisions.
+  - Leaflet zoom controls (`+ / -`) are cleanly offset below the top toolbar.
+  - The bottom-left displays a unified, single **xBD Damage & Heatmap Legend** (`SeverityLegend.jsx`), avoiding duplicate legend collisions.
+* **Database Seeding (`backend/scripts/seed_xbd.js`)**: Seeds realistic xBD pre/post satellite scene assessments with building footprints, class probabilities, IPFS CIDs, and Polygon Amoy transaction proofs.
 * **Uber H3 Hexagonal Hierarchical Spatial Index**:
   - To enable drone triage and localized search, the backend partitions damage zones into discrete H3 hexagonal cells (Resolution 8–9, ~100m–400m cell diameter).
   - Responders can click any individual hexagon on the map to inspect drone imagery specific to that cell.
@@ -296,7 +375,7 @@ Rubicon employs **both architectures**, each mathematically matched to its speci
    - If an attacker modifies even a single byte of the sensory image, the CID changes completely.
 2. **On-Chain Notarization (`PramaanLedger.sol`)**:
    - The backend wallet broadcasts an Ethereum transaction to the Polygon Amoy testnet:
-     `PramaanLedger.logAssessment(hsiCid, lidarCid, prediction)`.
+     `PramaanLedger.logAssessment(preCid, postCid, prediction)`.
    - The contract logs the entry with the blockchain's block timestamp and emits an `AssessmentLogged` event.
    - The transaction hash (`txHash`) is stored on the MongoDB assessment record.
 3. **On-Chain Re-Verification**:
@@ -381,30 +460,37 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 
 ### Machine Learning & Data Processing
 
-#### Q4: Why use both Hyperspectral (HSI) and LiDAR instead of standard satellite photography?
-**Answer:** Standard RGB satellite imagery only captures 3 visible spectral bands (Red, Green, Blue) and lacks depth. HSI captures hundreds of contiguous spectral bands that distinguish specific chemical and material compositions (e.g., exposed asbestos, fractured concrete, waterlogged drywall). LiDAR adds precise 3D spatial elevations $(X, Y, Z)$ to directly detect structural volume collapse and debris height deltas.
+#### Q4: Why use dual-temporal optical satellite pairs (xBD) instead of single post-disaster imagery?
+**Answer:** Disaster assessment is fundamentally a temporal change detection problem. Single post-event images cannot reliably distinguish whether an empty lot was always empty or previously had a building that was completely leveled. The xBD dataset pairs pre-disaster optical imagery (providing baseline building geometry) with post-disaster imagery. Our Siamese architecture extracts features from both epochs and analyzes the difference $|F_{\text{post}} - F_{\text{pre}}|$ to isolate structural damage.
 
-#### Q5: What is Mamba, and why is it preferred over a standard Transformer for Hyperspectral bands?
-**Answer:** Mamba is a State Space Model (SSM) featuring input-dependent selection (S6). Traditional Transformers suffer from quadratic computational complexity $O(N^2)$ relative to sequence length. Because hyperspectral pixels contain 144+ continuous spectral bands, processing them with full self-attention is computationally expensive and memory-intensive. Mamba operates with linear time complexity $O(N)$ and constant-state memory, modeling continuous spectral dependencies much more efficiently.
+#### Q5: How does the Siamese U-Net architecture operate, and why use shared weights?
+**Answer:** In `ai_engine/model/siamese_unet.py`, a single ResNet-34 encoder with shared weights processes both the pre- and post-disaster images. Sharing weights forces the encoder to project both temporal images into an identical feature space, ensuring that spatial activations represent actual physical differences between epochs rather than divergent feature representations.
 
-#### Q6: How does the Cross-Attention Fusion module work?
-**Answer:** In `ai-engine/src/model/fusion.py`, HSI spectral features from the Mamba branch are used as Queries ($Q$), while LiDAR geometric/elevation features act as Keys ($K$) and Values ($V$). This allows the network to dynamically weight spectral material signatures based on structural height changes before feeding the fused representation to the classification MLP.
+#### Q6: How does multi-scale feature difference fusion work?
+**Answer:** At each of the 4 hierarchical feature stages ($F_1$ to $F_4$), the network computes the element-wise absolute difference $\text{diff} = |F_{\text{post}} - F_{\text{pre}}|$ and concatenates $[F_{\text{pre}}, F_{\text{post}}, \text{diff}]$. This concatenated representation is passed via skip connections into the U-Net decoder, preserving fine-grained edge details and high-level semantic damage indicators.
 
-#### Q7: How do you reduce the high dimensionality of 144 hyperspectral bands?
-**Answer:** We apply 3D Principal Component Analysis (PCA) in `ai-engine/src/preprocessing/load_hsi.py`, projecting the 144 spectral bands down to the 30 most salient orthogonal components while retaining over 98% of the spectral variance.
+#### Q7: What is the loss formulation, and why combine BCE, Dice, CE, and Focal Loss?
+**Answer:** In `ai_engine/model/losses.py`, we optimize a joint multi-task objective:
+$$\mathcal{L}_{\text{total}} = 0.4 \times \mathcal{L}_{\text{loc}} + 0.6 \times \mathcal{L}_{\text{dmg}}$$
+- **Localization Head** uses BCE + Dice Loss ($\mathcal{L}_{\text{loc}} = \mathcal{L}_{\text{BCE}} + \mathcal{L}_{\text{Dice}}$) to handle binary building footprint delineation.
+- **Damage Classification Head** uses Class-Weighted Cross-Entropy + Focal Loss ($\gamma = 2.0$) ($\mathcal{L}_{\text{dmg}} = \mathcal{L}_{\text{CE, weighted}} + \mathcal{L}_{\text{Focal}}$) to counter the extreme class imbalance in xBD where ~70% of buildings have no damage.
 
-#### Q8: What dataset was used, and what are the target damage classes?
-**Answer:** The model is trained on the IEEE GRSS Houston 2013 multimodal dataset, which features co-registered hyperspectral imagery (144 bands, 380–1050 nm) and LiDAR elevation data. The damage assessment classes are `None` (intact), `Moderate` (partial damage), and `Severe Collapse` (complete structural destruction).
+#### Q8: What dataset is used, and what are the target damage classes?
+**Answer:** Rubicon is trained on the benchmark **xBD (xView2)** dataset developed by DIUx and Maxar. It covers over 45,000 km² across multiple global disaster events (earthquakes, tsunamis, wildfires, hurricanes, and volcanic eruptions). The 4 standardized damage assessment classes are:
+1. `No Damage` (intact building structure, green)
+2. `Minor Damage` (partial roof or non-structural damage, yellow)
+3. `Major Damage` (significant structural failure or wall collapse, orange)
+4. `Destroyed` (complete structural leveling or foundation collapse, red)
 
 ---
 
 ### GIS & Spatial Mapping
 
 #### Q9: How do you map pixel coordinate predictions to real-world latitude and longitude on Leaflet?
-**Answer:** The raw GeoTIFF and LAS files contain spatial metadata (affine transformation matrices and UTM projections). We reproject UTM Zone 15N meter coordinates into standard WGS84 (EPSG:4326) degrees latitude and longitude. The bounding coordinates are serialized into a GeoJSON `Polygon` and rendered as a vector layer on OpenStreetMap using React-Leaflet.
+**Answer:** Raw satellite files contain spatial metadata (GeoTIFF affine matrices or GeoJSON polygon bounding boxes). We convert bounding coordinates to standard WGS84 (EPSG:4326) degrees latitude and longitude. The bounding coordinates are serialized into a GeoJSON `Polygon` and rendered as an interactive vector layer on OpenStreetMap using React-Leaflet.
 
 #### Q10: What is Uber H3, and why is it used in this project?
-**Answer:** Uber H3 is a hexagonal hierarchical spatial indexing system. Unlike square grid partitions, every neighboring hexagon in an H3 grid is equidistant, eliminating directional distortion. Rubicon indexes disaster damage zones into H3 cells so emergency responders can deploy targeted drone inspections (`/drone`) to specific hexagonal sectors.
+**Answer:** Uber H3 is a hexagonal hierarchical spatial indexing system. Unlike square grid partitions, every neighboring hexagon in an H3 grid is equidistant, eliminating directional distortion. Rubicon indexes disaster damage zones into H3 cells (Resolutions 8–9) so emergency responders can deploy targeted drone inspections (`/drone`) to specific hexagonal sectors.
 
 ---
 
@@ -414,10 +500,10 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 **Answer:** Disaster recovery involves billions of dollars in insurance payouts and municipal relief funding, creating strong incentives for post-event insurance fraud, altered assessment dates, or fabricated imagery. By recording the IPFS cryptographic hash (CID) of the raw sensor data and model prediction to Polygon Amoy, Rubicon creates an unalterable, publicly auditable, timestamped proof of evidence.
 
 #### Q12: What exact data is stored on the Polygon blockchain?
-**Answer:** We do **not** store large sensory files directly on-chain due to gas costs and block size limits. Instead, we store a lightweight `LogEntry` struct in `PramaanLedger.sol` containing:
-- `hsiCid`: IPFS content identifier string for the HSI file.
-- `lidarCid`: IPFS content identifier string for the LiDAR file.
-- `prediction`: Damage classification string (`Severe Collapse`, etc.).
+**Answer:** We do **not** store large imagery files directly on-chain due to gas costs and block size limits. Instead, we store a lightweight `LogEntry` struct in `PramaanLedger.sol` containing:
+- `hsiCid`: IPFS content identifier string for the primary pre-disaster / optical file.
+- `lidarCid`: IPFS content identifier string for the post-disaster / event file.
+- `prediction`: Damage classification string (`Destroyed`, `Major Damage`, etc.).
 - `timestamp`: Block timestamp.
 - `logger`: Ethereum address of the recording authority.
 
@@ -475,8 +561,9 @@ This ensures that only authentic sensor files enter the processing pipeline.
 #### Q25: If an interviewer asks you to demonstrate the application right now, what exact steps will you take?
 **Answer:**
 1. Navigate to **`http://localhost:3000`** in the browser.
-2. Register an account (e.g. `evaluator@rubicon.dev`).
-3. Click **Upload Scan**, drag in `sample-scans/hsi.tiff` and `sample-scans/lidar.las`, and click **Start Assessment**.
-4. Show the multi-step progress bar transitioning through Uploading, Analyzing, and On-Chain Verification.
-5. Demonstrate the newly plotted damage polygon on the Leaflet map over Houston, clicking it to show severity, confidence percentage, and blockchain transaction hash.
-6. Open the AI Assistant chat panel on the right, ask *"How many assessments do we have?"*, and show how the agent executes a live tool call against the backend to return an accurate, grounded answer.
+2. Register an account (e.g. `evaluator@rubicon.dev` / `Password123`).
+3. Click **+ Upload** on the top bar to open the **xBD Satellite Assessment** modal.
+4. Drag in the **Pre-Disaster Optical Scan (Reference)** and **Post-Disaster Optical Scan (Event)** images, and click **Run Assessment**.
+5. Show the multi-step progress bar transitioning through Uploading, Analyzing, and On-Chain Verification.
+6. Demonstrate the newly plotted damage polygon on the Leaflet map over the disaster area, clicking it to show severity (`No Damage`, `Minor Damage`, `Major Damage`, or `Destroyed`), class confidence percentage, IPFS CIDs, and blockchain transaction hash.
+7. Open the AI Assistant chat panel on the right, ask *"How many assessments do we have?"* or *"Show me severe zones"*, and show how the agent executes a live tool call against the backend to return an accurate, grounded answer.

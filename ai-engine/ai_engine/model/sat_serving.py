@@ -19,6 +19,11 @@ import torch
 
 from .siamese_unet import SiameseUNet
 from .aggregator import aggregate_to_h3, cells_to_geojson
+from .checkpoint import (
+    build_model_from_checkpoint,
+    load_checkpoint,
+    norm_stats_from_checkpoint,
+)
 
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
@@ -72,14 +77,21 @@ def _load_image_geotiff(path: str | Path) -> tuple[np.ndarray, Any, Any]:
     return result, transform, crs
 
 
-def _preprocess(rgb: np.ndarray, crop_size: int | None = None) -> torch.Tensor:
+def _preprocess(
+    rgb: np.ndarray,
+    crop_size: int | None = None,
+    norm_mean: np.ndarray | None = None,
+    norm_std: np.ndarray | None = None,
+) -> torch.Tensor:
     """Normalize and convert to (1, 3, H, W) tensor."""
     if crop_size is not None:
         h, w = rgb.shape[:2]
         if h != crop_size or w != crop_size:
             rgb = cv2.resize(rgb, (crop_size, crop_size), interpolation=cv2.INTER_AREA)
+    mean = _IMAGENET_MEAN if norm_mean is None else norm_mean
+    std = _IMAGENET_STD if norm_std is None else norm_std
     img = rgb.astype(np.float32) / 255.0
-    img = (img - _IMAGENET_MEAN) / _IMAGENET_STD
+    img = (img - mean) / std
     tensor = torch.from_numpy(img.transpose(2, 0, 1)).unsqueeze(0).float()  # (1,3,H,W)
     return tensor
 
@@ -89,14 +101,8 @@ def load_siamese_runtime(model_dir: str | Path) -> dict:
     cp_path = Path(model_dir) / "siamese_unet.pt"
     if not cp_path.exists():
         raise FileNotFoundError(cp_path)
-    cp = torch.load(str(cp_path), map_location="cpu", weights_only=True)
-    model = SiameseUNet(
-        encoder_name=cp.get("encoder_name", "resnet34"),
-        encoder_weights=None,
-        num_classes=cp.get("num_classes", 5),
-    )
-    model.load_state_dict(cp["state_dict"])
-    model.eval()
+    cp = load_checkpoint(cp_path, map_location="cpu", expected_num_classes=5)
+    model = build_model_from_checkpoint(cp, device="cpu")
     return {"model": model, "checkpoint": cp}
 
 
@@ -111,7 +117,7 @@ def infer_satellite(
     model: SiameseUNet,
     checkpoint: dict,
     device: torch.device | None = None,
-    crop_size: int = 512,
+    crop_size: int | None = None,
     resolutions: tuple[int, ...] = (9, 10),
 ) -> dict:
     """Run Siamese U-Net over a pre/post image pair and return the contract body.
@@ -128,6 +134,8 @@ def infer_satellite(
     t0 = time.perf_counter()
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if crop_size is None:
+        crop_size = int((checkpoint.get("config") or {}).get("crop_size") or 512)
 
     # Load images
     loader = _load_image_geotiff if _is_geotiff(pre_path) else _load_image_cv2
@@ -140,9 +148,12 @@ def infer_satellite(
 
     H_orig, W_orig = pre_rgb.shape[:2]
 
-    # Preprocess
-    pre_t = _preprocess(pre_rgb, crop_size).to(device)
-    post_t = _preprocess(post_rgb, crop_size).to(device)
+    # Preprocess (use the normalisation fitted during training)
+    mean_list, std_list = norm_stats_from_checkpoint(checkpoint)
+    mean = np.asarray(mean_list, dtype=np.float32).reshape(1, 1, 3)
+    std = np.asarray(std_list, dtype=np.float32).reshape(1, 1, 3)
+    pre_t = _preprocess(pre_rgb, crop_size, mean, std).to(device)
+    post_t = _preprocess(post_rgb, crop_size, mean, std).to(device)
 
     if pre_t.is_cuda:
         pre_t = pre_t.to(memory_format=torch.channels_last)
@@ -193,7 +204,7 @@ def infer_satellite(
         "post_sha256": post_sha256,
         "buildings_geojson": buildings_fc,
         "model_version": checkpoint.get("model_version", "siamese_unet-v1"),
-        "damage_classes": DAMAGE_CLASSES,
+        "damage_classes": checkpoint.get("damage_classes", DAMAGE_CLASSES),
         "exec_ms": exec_ms,
     }
 

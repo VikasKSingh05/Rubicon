@@ -9,8 +9,8 @@ const STEPS = [
 ];
 
 const ACCEPT = {
-  hsi: [".tif", ".tiff"],
-  lidar: [".las", ".laz"],
+  hsi: [".tif", ".tiff", ".png", ".jpg", ".jpeg"],
+  lidar: [".las", ".laz", ".png", ".jpg", ".jpeg", ".tif", ".tiff"],
 };
 
 const MAX_BYTES = 100 * 1024 * 1024;
@@ -18,8 +18,11 @@ const MAX_BYTES = 100 * 1024 * 1024;
 function fileError(file, kind) {
   if (!file) return null;
   const ext = `.${file.name.split(".").pop()?.toLowerCase()}`;
-  if (!ACCEPT[kind].includes(ext)) {
-    return `Only ${ACCEPT[kind].join(", ")} files are supported.`;
+  if (kind === "hsi" && ![".tif", ".tiff", ".png", ".jpg", ".jpeg"].includes(ext)) {
+    return `Only .tif, .tiff files are supported.`;
+  }
+  if (kind === "lidar" && ![".las", ".laz", ".png", ".jpg", ".jpeg", ".tif", ".tiff"].includes(ext)) {
+    return `Only .las, .laz files are supported.`;
   }
   if (file.size > MAX_BYTES) return "File exceeds the 100 MB limit.";
   return null;
@@ -156,6 +159,8 @@ export default function UploadModal({ onClose, onCreated }) {
 
     try {
       const form = new FormData();
+      form.append("pre", hsi);
+      form.append("post", lidar);
       form.append("hsi", hsi);
       form.append("lidar", lidar);
       const data = await api("/upload", { method: "POST", body: form });
@@ -177,10 +182,13 @@ export default function UploadModal({ onClose, onCreated }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-primary">Upload New Scan</h2>
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+          <div>
+            <h2 className="text-lg font-bold text-primary">xBD Satellite Assessment</h2>
+            <p className="text-xs text-slate-500">Siamese U-Net Pre & Post Disaster Pipeline</p>
+          </div>
           <button
             onClick={close}
             className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100"
@@ -196,14 +204,14 @@ export default function UploadModal({ onClose, onCreated }) {
           <form onSubmit={handleSubmit}>
             <div className="space-y-4">
               <FileDropzone
-                label="Hyperspectral (HSI)"
+                label="Hyperspectral / Pre-Disaster Optical Scan"
                 kind="hsi"
                 file={hsi}
                 error={phase === "error" || hsi ? hsiFileError : null}
                 onFile={setHsi}
               />
               <FileDropzone
-                label="LiDAR"
+                label="LiDAR / Post-Disaster Optical Scan"
                 kind="lidar"
                 file={lidar}
                 error={phase === "error" || lidar ? lidarFileError : null}
@@ -214,7 +222,7 @@ export default function UploadModal({ onClose, onCreated }) {
             <button
               type="submit"
               disabled={!canSubmit}
-              className="mt-5 w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-5 w-full rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Run Assessment
             </button>
