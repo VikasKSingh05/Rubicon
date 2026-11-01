@@ -39,6 +39,10 @@ runs/
 !sample-scans/*.tiff
 !sample-scans/*.las
 
+# Generated qualitative artifacts (regenerate with ai_engine.data.check / eval.py)
+docs/samples/
+docs/results/
+
 # ---- Coverage & test artifacts ----
 coverage/
 .nyc_output/
