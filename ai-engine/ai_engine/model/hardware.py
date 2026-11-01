@@ -37,8 +37,94 @@ class HardwareProfile:
     notes: str = ""
 
 
-def detect_hardware() -> HardwareProfile:
-    """Auto-detect system hardware and return optimal training/inference profile."""
+def detect_hardware(profile_override: str | None = None) -> HardwareProfile:
+    """Auto-detect system hardware and return optimal training/inference profile.
+
+    ``profile_override`` may be ``auto``/``None`` (detect), ``local_6gb``,
+    ``kaggle``, or ``cpu``.  GPU profiles silently fall back to the CPU profile
+    when CUDA is unavailable, so a stale config cannot crash a run.
+    """
+    profile = _detect_profile()
+    if profile_override and profile_override != "auto":
+        profile = _apply_override(profile, profile_override)
+    return profile
+
+
+def _apply_override(base: HardwareProfile, name: str) -> HardwareProfile:
+    """Return a hardware profile with explicit hyperparameters."""
+    key = name.strip().lower()
+    has_cuda = torch.cuda.is_available()
+
+    if key in ("cpu", "cpu_fallback"):
+        print(f"[INFO] Hardware profile forced to CPU (was {base.name}).")
+        return HardwareProfile(
+            name="cpu_fallback",
+            device="cpu",
+            encoder="resnet18",
+            crop_size=256,
+            batch_size=2,
+            grad_accum_steps=2,
+            use_amp=False,
+            channels_last=False,
+            num_workers=0,
+            pin_memory=False,
+            vram_gb=base.vram_gb,
+            ram_gb=base.ram_gb,
+            disk_free_gb=base.disk_free_gb,
+            notes="Explicit CPU profile (no AMP, reduced crop)",
+        )
+
+    if key in ("local_6gb", "local", "rtx3050"):
+        if not has_cuda:
+            print("[WARN] local_6gb requested but CUDA is unavailable; using CPU profile.")
+            return _apply_override(base, "cpu")
+        print(f"[INFO] Hardware profile forced to local_6gb (was {base.name}).")
+        return HardwareProfile(
+            name="local_6gb",
+            device="cuda",
+            encoder="resnet34",
+            crop_size=512,
+            batch_size=2,
+            grad_accum_steps=4,
+            use_amp=True,
+            channels_last=True,
+            num_workers=2 if os.name == "nt" else 4,
+            pin_memory=True,
+            vram_gb=base.vram_gb,
+            ram_gb=base.ram_gb,
+            disk_free_gb=base.disk_free_gb,
+            notes="Forced local RTX 3050 6GB profile",
+        )
+
+    if key in ("kaggle", "kaggle_16gb", "kaggle_15gb"):
+        if not has_cuda:
+            print("[WARN] kaggle profile requested but CUDA is unavailable; using CPU profile.")
+            return _apply_override(base, "cpu")
+        print(f"[INFO] Hardware profile forced to kaggle_16gb (was {base.name}).")
+        return HardwareProfile(
+            name="kaggle_16gb",
+            device="cuda",
+            encoder="resnet34",
+            crop_size=512,
+            batch_size=8,
+            grad_accum_steps=1,
+            use_amp=True,
+            channels_last=True,
+            num_workers=4 if os.name != "nt" else 2,
+            pin_memory=True,
+            vram_gb=base.vram_gb,
+            ram_gb=base.ram_gb,
+            disk_free_gb=base.disk_free_gb,
+            notes="Forced Kaggle P100/T4 profile",
+        )
+
+    raise ValueError(
+        f"Unknown hardware profile '{name}'. Use auto, local_6gb, kaggle, or cpu."
+    )
+
+
+def _detect_profile() -> HardwareProfile:
+    """Detect the hardware profile from the current machine."""
     # RAM and Disk
     if psutil is not None:
         ram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
