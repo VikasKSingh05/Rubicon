@@ -20,9 +20,13 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from ai_engine.model.siamese_unet import SiameseUNet
 from ai_engine.model.metrics import XView2Metrics, DAMAGE_CLASS_NAMES
 from ai_engine.model.hardware import detect_hardware
+from ai_engine.model.checkpoint import (
+    build_model_from_checkpoint,
+    load_checkpoint,
+    norm_stats_from_checkpoint,
+)
 from ai_engine.data.splits import load_or_create_splits, get_xbd_root
 from ai_engine.data.dataset import XBDDataset
 from ai_engine.data.synthetic import generate_synthetic_dataset
@@ -40,6 +44,8 @@ def create_eval_overlay(
     """Create a 4-panel visual comparison: Pre, Post, Ground Truth Damage, Predicted Damage."""
     pre_bgr = cv2.imread(pre_path)
     post_bgr = cv2.imread(post_path)
+    if pre_bgr is None or post_bgr is None:
+        raise FileNotFoundError(f"Cannot read overlay images for tile {tile_id}")
     h, w = pre_bgr.shape[:2]
 
     # Resize predictions/ground truth if needed
@@ -106,6 +112,8 @@ def evaluate():
     parser.add_argument("--xbd-root", type=str, default=None, help="Root path to xBD dataset")
     parser.add_argument("--synthetic", action="store_true", help="Evaluate in synthetic mode")
     parser.add_argument("--batch-size", type=int, default=2, help="Validation batch size")
+    parser.add_argument("--max-tiles", type=int, default=None, help="Cap the number of validation tiles")
+    parser.add_argument("--cache-dir", type=str, default="data/xbd_cache", help="Directory for cached rasterized masks")
     args = parser.parse_args()
 
     out_dir = Path(args.output_dir)
@@ -125,20 +133,16 @@ def evaluate():
     device = torch.device(profile.device)
 
     print(f"\n[INFO] Loading checkpoint from '{ckpt_path.resolve()}'...")
-    checkpoint = torch.load(ckpt_path, map_location=device)
+    checkpoint = load_checkpoint(ckpt_path, map_location=device, expected_num_classes=5)
     cfg = checkpoint.get("config", {})
-    encoder_name = cfg.get("encoder", "resnet34")
+    encoder_name = checkpoint.get("encoder_name", cfg.get("encoder", "resnet34"))
+    model_version = checkpoint.get("model_version", "siamese_unet-v1")
 
-    model = SiameseUNet(
-        encoder_name=encoder_name,
-        encoder_weights=None,
-        num_classes=5,
-    ).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
-
-    norm_mean = checkpoint.get("norm_mean", [0.485, 0.456, 0.406])
-    norm_std = checkpoint.get("norm_std", [0.229, 0.224, 0.225])
+    model = build_model_from_checkpoint(checkpoint, device=device)
+    norm_mean, norm_std = norm_stats_from_checkpoint(checkpoint)
+    print(f"[INFO] Model: {model_version} | encoder={encoder_name} | "
+          f"hash={checkpoint.get('state_dict_hash', 'n/a')}")
+    print(f"[INFO] Normalization mean={norm_mean} std={norm_std}")
 
     # 2. Dataset resolution
     if args.synthetic:
@@ -150,12 +154,19 @@ def evaluate():
             xbd_root = generate_synthetic_dataset()
 
     splits = load_or_create_splits(xbd_root=xbd_root)
+    split_meta = splits.get("metadata", {})
     val_manifest = splits["val"]
+    if args.max_tiles is not None:
+        val_manifest = val_manifest[: max(0, args.max_tiles)]
+
+    cache_dir = Path(args.cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
     val_dataset = XBDDataset(
         tiles=val_manifest,
         crop_size=cfg.get("crop_size", 512),
         is_train=False,
+        cache_dir=cache_dir,
         norm_stats=(norm_mean, norm_std),
     )
     val_loader = DataLoader(
@@ -165,7 +176,10 @@ def evaluate():
         num_workers=0,
     )
 
-    print(f"[INFO] Evaluating on {len(val_manifest)} holdout validation tiles...")
+    print(f"[INFO] Evaluating on {len(val_manifest)} event-disjoint validation tiles "
+          f"({', '.join(split_meta.get('val_events', []))})...")
+    for warning in split_meta.get("warnings", []):
+        print(f"[WARN] {warning}")
 
     # 3. Evaluation loop
     metrics_meter = XView2Metrics()
@@ -222,10 +236,16 @@ def evaluate():
     metrics_path = out_dir / "metrics.json"
     metrics_payload = {
         "checkpoint": str(ckpt_path.resolve()),
-        "model_version": cfg.get("model_version", "siamese_unet_v1"),
+        "checkpoint_hash": checkpoint.get("state_dict_hash"),
+        "model_version": model_version,
         "encoder": encoder_name,
-        "holdout_events": splits["metadata"]["val_events"],
+        "class_names": checkpoint.get("damage_classes", DAMAGE_CLASS_NAMES),
+        "data_mode": "synthetic" if args.synthetic else "real_xbd",
+        "source_split": split_meta.get("source_split"),
+        "train_events": split_meta.get("train_events", []),
+        "holdout_events": split_meta.get("val_events", []),
         "num_holdout_tiles": len(val_manifest),
+        "split_warnings": split_meta.get("warnings", []),
         "results": metrics,
     }
     with metrics_path.open("w", encoding="utf-8") as f:

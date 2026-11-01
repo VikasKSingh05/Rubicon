@@ -148,10 +148,20 @@ Or run individually:
 ### 1. Generate Synthetic xBD Dataset (for fast local dev / CI)
 ```powershell
 cd ai-engine
-python -c "from ai_engine.data.synthetic import generate_synthetic_dataset; generate_synthetic_dataset(output_dir='data/synthetic_xbd', num_pairs=8)"
+python -c "from ai_engine.data.synthetic import generate_synthetic_dataset; generate_synthetic_dataset(output_dir='data/synthetic_xbd', tiles_per_event=3)"
 ```
 
-### 2. Run Exploratory Data Analysis (EDA)
+### 2. Train and Evaluate on the Real xBD Split
+```powershell
+$env:XBD_ROOT="./data/xbd"
+python train.py --epochs 30 --config auto      # auto -> local_6gb / kaggle / cpu
+python eval.py --checkpoint data/models/checkpoint_best.pt
+```
+Checkpoints and metrics land in `data/models/` and `docs/results/` (both
+gitignored). See `docs/training.md` for the checkpoint contract and
+`docs/data.md` for the exact event-disjoint split.
+
+### 3. Run Exploratory Data Analysis (EDA)
 Inspect xBD class distribution, polygon pixel areas, disaster event breakdown, and computed inverse-frequency loss weights:
 ```powershell
 cd ai-engine
@@ -167,7 +177,7 @@ cd ai-engine
 jupyter lab notebooks/eda.ipynb
 ```
 
-### 3. Run Hyperparameter Tuning
+### 4. Run Hyperparameter Tuning
 Search optimal backbone encoders (`resnet18`, `resnet34`), learning rates, localization loss weights, and focal loss gamma:
 ```powershell
 cd ai-engine
@@ -178,7 +188,7 @@ python scripts/tune_hyperparams.py --synthetic --trials 5 --epochs 1 --dry-run
 python scripts/tune_hyperparams.py --data-dir data/xbd --trials 20 --epochs 10 --device cuda
 ```
 
-### 4. Interactive GIS Heatmap on Frontend
+### 5. Interactive GIS Heatmap on Frontend
 The Frontend dashboard (`http://localhost:3000`) includes a Leaflet GIS layer for xBD disaster hotspots:
 1. Open **`http://localhost:3000`**.
 2. Look at the top-right GIS Layer Control box on the map.
