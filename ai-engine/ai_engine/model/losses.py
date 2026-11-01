@@ -21,32 +21,53 @@ class DiceLoss(nn.Module):
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         probs = torch.sigmoid(logits)
-        probs_flat = probs.view(-1)
-        targets_flat = targets.view(-1)
+        probs_flat = probs.reshape(-1)
+        targets_flat = targets.reshape(-1).float()
 
         intersection = (probs_flat * targets_flat).sum()
-        dice = (2.0 * intersection + self.smooth) / (probs_flat.sum() + targets_flat.sum() + self.smooth)
+        dice = (2.0 * intersection + self.smooth) / (
+            probs_flat.sum() + targets_flat.sum() + self.smooth
+        )
         return 1.0 - dice
 
 
 class FocalLoss(nn.Module):
-    """Multi-class Focal Loss to counter extreme foreground/background and damage imbalance."""
+    """Multi-class focal loss to counter foreground/background and damage imbalance.
 
-    def __init__(self, gamma: float = 2.0, weight: torch.Tensor | None = None, reduction: str = "mean"):
+    Class weights are stored as a buffer, so they move to the GPU together
+    with the module when `.to(device)` is called. Pixels whose target equals
+    `ignore_index` (for example "un-classified") contribute nothing.
+    """
+
+    def __init__(
+        self,
+        gamma: float = 2.0,
+        weight: torch.Tensor | None = None,
+        reduction: str = "mean",
+        ignore_index: int = -100,
+    ):
         super().__init__()
         self.gamma = gamma
-        self.weight = weight
         self.reduction = reduction
+        self.ignore_index = ignore_index
+        self.register_buffer("weight", weight)  # None is allowed
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        # Cross entropy loss per-pixel without reduction
-        ce_loss = F.cross_entropy(logits, targets, weight=self.weight, reduction="none")
+        # Per-pixel cross entropy, no reduction; ignored pixels give 0 loss
+        ce_loss = F.cross_entropy(
+            logits,
+            targets,
+            weight=self.weight,
+            reduction="none",
+            ignore_index=self.ignore_index,
+        )
         pt = torch.exp(-ce_loss)
         focal_loss = ((1.0 - pt) ** self.gamma) * ce_loss
 
         if self.reduction == "mean":
-            return focal_loss.mean()
-        elif self.reduction == "sum":
+            valid = (targets != self.ignore_index).sum().clamp(min=1)
+            return focal_loss.sum() / valid
+        if self.reduction == "sum":
             return focal_loss.sum()
         return focal_loss
 
@@ -60,10 +81,12 @@ class RubiconLoss(nn.Module):
         loc_weight: float = 0.4,
         dmg_weight: float = 0.6,
         focal_gamma: float = 2.0,
+        ignore_index: int = -100,
     ):
         super().__init__()
         self.loc_weight = loc_weight
         self.dmg_weight = dmg_weight
+        self.ignore_index = ignore_index
 
         # 1. Localization loss components (BCE + Dice)
         self.bce = nn.BCEWithLogitsLoss()
@@ -71,17 +94,22 @@ class RubiconLoss(nn.Module):
 
         # 2. Damage classification loss components (Weighted CE + Focal)
         if class_weights is not None:
-            if not isinstance(class_weights, torch.Tensor):
-                weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+            if isinstance(class_weights, torch.Tensor):
+                weights_tensor = class_weights.detach().clone().float()
             else:
-                weights_tensor = class_weights
+                weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
         else:
-            # Default class weights: background downweighted, destroyed/major boosted
+            # Default: background downweighted, damaged classes boosted
             weights_tensor = torch.tensor([0.2, 1.0, 2.0, 2.5, 3.0], dtype=torch.float32)
 
+        # Buffers move with criterion.to(device); do NOT store weights as plain attributes
         self.register_buffer("class_weights", weights_tensor)
-        self.ce = nn.CrossEntropyLoss(weight=self.class_weights)
-        self.focal = FocalLoss(gamma=focal_gamma, weight=self.class_weights)
+        self.ce = nn.CrossEntropyLoss(weight=self.class_weights, ignore_index=ignore_index)
+        self.focal = FocalLoss(
+            gamma=focal_gamma,
+            weight=self.class_weights,
+            ignore_index=ignore_index,
+        )
 
     def forward(
         self,
@@ -90,20 +118,22 @@ class RubiconLoss(nn.Module):
         loc_targets: torch.Tensor,
         dmg_targets: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        # Ensure correct device
-        if self.class_weights.device != dmg_logits.device:
-            self.class_weights = self.class_weights.to(dmg_logits.device)
-            self.ce.weight = self.class_weights
-            self.focal.weight = self.class_weights
+        loc_targets = loc_targets.float()
+        dmg_targets = dmg_targets.long()
 
         # 1. Localization loss: BCE + Dice
         loss_bce = self.bce(loc_logits, loc_targets)
         loss_dice = self.dice(loc_logits, loc_targets)
         loc_loss = loss_bce + loss_dice
 
-        # 2. Damage loss: Class-weighted CE + Focal
-        loss_ce = self.ce(dmg_logits, dmg_targets)
-        loss_focal = self.focal(dmg_logits, dmg_targets)
+        # 2. Damage loss: class-weighted CE + Focal
+        # Guard: if every pixel is ignored, CE would return NaN
+        if (dmg_targets != self.ignore_index).any():
+            loss_ce = self.ce(dmg_logits, dmg_targets)
+            loss_focal = self.focal(dmg_logits, dmg_targets)
+        else:
+            loss_ce = dmg_logits.sum() * 0.0
+            loss_focal = dmg_logits.sum() * 0.0
         dmg_loss = loss_ce + loss_focal
 
         # 3. Weighted total loss
