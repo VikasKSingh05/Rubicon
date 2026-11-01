@@ -1,9 +1,8 @@
 # Kaggle Training Workflow (16 GB profile)
 
-The local machine is a 6 GB RTX 3050. The full event-disjoint split
-(2,565 train tiles / 234 validation tiles) is meant to be trained on Kaggle with
-the `kaggle_16gb` profile, then the resulting checkpoint is brought back for
-serving. The notebook is
+The full event-disjoint xBD split can be trained locally when a CUDA-enabled
+PyTorch build and sufficient GPU memory are available, or on Kaggle with the
+`kaggle_16gb` profile. The notebook is
 `ai-engine/notebooks/kaggle_xbd_training.ipynb`.
 
 ## 1. Upload the dataset
@@ -42,8 +41,10 @@ only a tile-level qualitative holdout (see `docs/data.md`).
    verifier used locally — and asserts the validation split is non-empty.
 5. Trains with `python train.py --config kaggle --epochs 30`.
 6. Evaluates with `python eval.py --checkpoint .../checkpoint_best.pt`.
-7. Prints the provenance block from `metrics.json` (checkpoint hash, data mode,
-   train/holdout events, tile count, xView2, localization F1, damage F1).
+7. Prints the evaluation provenance and metrics from `results/metrics.json`
+   (checkpoint hash, data mode, split, tile count, xView2, localization F1,
+   damage F1). The trainer separately writes `models/training_metrics.json`
+   with model parameters, hyperparameters, hardware, and epoch history.
 
 ## 4. Expected runtime (order of magnitude, not a guarantee)
 
@@ -62,15 +63,16 @@ From the notebook **Output** tab download:
 
 - `models/checkpoint_best.pt` (weights + config + norm stats)
 - `models/siamese_unet.pt` (serving artifact)
-- `results/metrics.json`
+- `models/training_metrics.json` (model/training provenance and epoch history)
+- `results/metrics.json` (evaluation metrics and checkpoint hash)
 - `samples/*.png` (qualitative overlays)
 
-Place the serving checkpoint in `data/models/` locally (gitignored) and point
+Place the serving checkpoint in `data/models/xbd/` locally (gitignored) and point
 `RUBICON_MODEL_DIR` at that directory:
 
 ```powershell
-$env:RUBICON_MODEL_DIR="data/models"
-python -m uvicorn ai_engine.serve:app --host 0.0.0.0 --port 8000
+$env:RUBICON_MODEL_DIR="data/models/xbd"
+python -m uvicorn ai_engine.serve:app --host 127.0.0.1 --port 8002
 ```
 
 Serving normalises inputs with the checkpoint's own `norm_mean`/`norm_std`, so
@@ -84,18 +86,20 @@ no manual preprocessing step is required.
 - Always state the checkpoint hash and `data_mode` (`real_xbd`) with any number.
 - Do not quote CPU smoke-test numbers (xView2 ≈ 0.17 on 5 tiles) as model
   quality; they only prove the pipeline runs.
-- The local GPU has not yet produced metrics because the installed PyTorch
-  wheel was CPU-only (`docs/audit.md`). Kaggle is the supported path to real
-  numbers until a CUDA wheel is installed locally.
+- Check the current environment with `python -c "import torch; print(torch.cuda.is_available())"`
+  before choosing local GPU or Kaggle. Do not rely on an older environment
+  snapshot in the audit for current CUDA availability.
 
 ## 7. Local equivalent of the same run
 
-If a CUDA-enabled PyTorch is installed locally:
+From `ai-engine`, if a CUDA-enabled PyTorch is installed locally:
 
 ```powershell
-$env:XBD_ROOT="./data/xbd"
-python train.py --epochs 30 --config local_6gb
-python eval.py --checkpoint data/models/checkpoint_best.pt
+$XbdRoot = "D:\datasets\xbd"
+python train.py --xbd-root $XbdRoot --epochs 30 --config auto --subset 1.0 `
+  --output-dir data/models/xbd --log-dir runs/xbd-local
+python eval.py --xbd-root $XbdRoot --checkpoint data/models/xbd/checkpoint_best.pt `
+  --split val --output-dir data/models/xbd/eval-val
 ```
 
 On CUDA OOM the trainer reduces the crop (512 -> 384 -> 256), rebuilds the

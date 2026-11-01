@@ -1,6 +1,9 @@
-# Rubicon ai-engine — xBD Dual-Task Siamese U-Net
+# Rubicon AI Engine — xBD Dual-Task Siamese U-Net
 
-The Rubicon AI Engine is a deep learning service for automated post-disaster building damage assessment using pre- and post-disaster high-resolution optical satellite imagery from the **xBD (xView2) dataset**.
+This part of Rubicon contains the xBD Siamese U-Net for automated post-disaster
+building damage assessment from pre- and post-disaster optical imagery. It is
+the satellite model; the repository's HSI/LiDAR Mamba-Transformer pipeline is
+a separate model and uses separate artifacts.
 
 ## 🏗️ Model Architecture
 
@@ -11,12 +14,13 @@ The architecture implements a **Dual-Task Siamese U-Net** based on the research 
 2. **Feature Fusion Layer**: Fuses pre and post feature maps via concatenation and absolute difference:
    - $F_{\text{fused}} = [F_{\text{pre}} \,\|\, F_{\text{post}} \,\|\, |F_{\text{post}} - F_{\text{pre}}|]$
 3. **Dual-Task Decoders**:
-   - **Localization Decoder**: Segments all building footprints from pre-disaster features (Binary Cross-Entropy + Dice Loss).
-   - **Classification Decoder**: Classifies 4-tier damage severity on post-disaster features (Weighted Cross-Entropy / Focal Loss):
-     - `0: No Damage`
-     - `1: Minor Damage`
-     - `2: Major Damage`
-     - `3: Destroyed`
+   - **Localization Decoder**: Predicts building footprints (Binary Cross-Entropy + Dice Loss).
+   - **Classification Decoder**: Predicts five pixel classes (weighted Cross-Entropy + Focal Loss):
+     - `0: Background`
+     - `1: No damage`
+     - `2: Minor damage`
+     - `3: Major damage`
+     - `4: Destroyed`
 4. **Polygon Aggregator**: Masks classification output with predicted building footprints and aggregates per-building polygon damage confidence distributions.
 
 ---
@@ -40,7 +44,8 @@ ai-engine/
 │   │   └── hardware.py       # Hardware auto-detection (MPS/CUDA/CPU/RAM)
 │   ├── training/
 │   │   └── train.py          # Training loop with AMP, checkpointing & logging
-│   └── serve.py              # FastAPI server implementing the `/predict` contract
+│   └── serve.py              # FastAPI satellite app, including POST /infer/satellite
+├── src/                      # Separate legacy Houston HSI/LiDAR experiment (/predict)
 ├── scripts/
 │   ├── download_xbd.py       # xBD dataset access guide & synthetic generator
 │   ├── eda_xbd.py            # Comprehensive xBD Exploratory Data Analysis
@@ -54,6 +59,27 @@ ai-engine/
 ---
 
 ## ⚡ Quick Start
+
+### Train on a local real xBD dataset (Windows PowerShell)
+
+The dataset root must contain `train\images`, `train\labels`, and optionally
+`hold\images` and `hold\labels`. From this `ai-engine` directory:
+
+```powershell
+$XbdRoot = "D:\datasets\xbd"
+python -m pip install -r requirements.txt
+python -m ai_engine.data.check --xbd-root $XbdRoot --samples 5 --crosscheck 5
+python train.py --xbd-root $XbdRoot --config auto --epochs 30 --subset 1.0 `
+  --output-dir data/models/xbd --log-dir runs/xbd-mentor-demo
+python eval.py --xbd-root $XbdRoot --checkpoint data/models/xbd/checkpoint_best.pt `
+  --split val --output-dir data/models/xbd/eval-val
+```
+
+The primary reported score is from the event-disjoint validation subset of
+`train/`. `hold/` contains tile-level holdout data and is supplemental; see the
+[training guide](../docs/training.md) for running that evaluation, interpreting
+results, and loading the trained model in Rubicon. Missing data paths stop the
+run instead of silently substituting synthetic data.
 
 ### 1. Generate Synthetic Data
 ```bash
@@ -82,7 +108,10 @@ pytest tests/test_xbd_data.py
 
 ### 5. Start Inference Server
 ```bash
-python -m uvicorn ai_engine.serve:app --host 0.0.0.0 --port 8000
+python -m uvicorn ai_engine.serve:app --host 127.0.0.1 --port 8002
 ```
-- Health Check: `GET http://localhost:8000/health`
-- Predict API: `POST http://localhost:8000/predict` (multipart `pre_image` and `post_image`)
+- Health Check: `GET http://localhost:8002/health` (`model_loaded` should be `true`)
+- Satellite API: `POST http://localhost:8002/infer/satellite` (multipart `pre` and `post`)
+
+The separate legacy HSI/LiDAR app is served from `src.inference` on port 8000.
+It is not the xBD Siamese U-Net and has independent model artifacts.

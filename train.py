@@ -75,6 +75,7 @@ def parse_args():
 
 def train():
     args = parse_args()
+    run_started = time.perf_counter()
 
     # 1. Hardware auto-detection (respects --config)
     profile = detect_hardware(args.config)
@@ -85,12 +86,8 @@ def train():
         print("[INFO] --synthetic flag active. Generating procedural dataset...")
         xbd_root = generate_synthetic_dataset()
     else:
-        try:
-            xbd_root = get_xbd_root(args.xbd_root)
-        except FileNotFoundError as err:
-            print(f"[WARN] {err}")
-            print("[INFO] Falling back to procedural SYNTHETIC dataset for training...")
-            xbd_root = generate_synthetic_dataset()
+        xbd_root = get_xbd_root(args.xbd_root)
+    data_mode = "synthetic" if args.synthetic else "real_xbd"
 
     splits = load_or_create_splits(xbd_root=xbd_root)
     train_manifest = splits["train"]
@@ -183,6 +180,10 @@ def train():
         encoder_weights=None if args.no_pretrained else "imagenet",
         num_classes=5,
     ).to(device)
+    parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    trainable_parameter_count = sum(
+        parameter.numel() for parameter in model.parameters() if parameter.requires_grad
+    )
 
     if profile.channels_last:
         model = model.to(memory_format=torch.channels_last)
@@ -238,6 +239,8 @@ def train():
     writer = SummaryWriter(log_dir=args.log_dir)
 
     epoch_durations = []
+    history = []
+    best_epoch = None
 
     print("\n" + "=" * 65)
     print(f"STARTING TRAINING: {len(train_dataset)} Train Tiles | {len(val_dataset)} Val Tiles | {total_epochs} Epochs")
@@ -356,6 +359,15 @@ def train():
         avg_val_loss = val_running_loss / max(1, val_batches)
         metrics = val_metrics_meter.compute()
         xview2_score = metrics["xview2_score"]
+        history.append({
+            "epoch": epoch + 1,
+            "train_loss": avg_train_loss,
+            "train_localization_loss": avg_loc_loss,
+            "train_damage_loss": avg_dmg_loss,
+            "validation_loss": avg_val_loss,
+            "validation_metrics": metrics,
+            "duration_sec": epoch_dur,
+        })
 
         # Estimate remaining training time
         avg_epoch_sec = sum(epoch_durations) / len(epoch_durations)
@@ -409,6 +421,20 @@ def train():
                     "val_events": split_meta.get("val_events", []),
                     "train_events": split_meta.get("train_events", []),
                     "source_split": split_meta.get("source_split"),
+                    "data_mode": data_mode,
+                    "optimizer": "AdamW",
+                    "learning_rate": args.lr,
+                    "weight_decay": 1e-4,
+                    "scheduler": "linear_warmup_cosine",
+                    "warmup_epochs": warmup_epochs,
+                    "localization_loss_weight": 0.4,
+                    "damage_loss_weight": 0.6,
+                    "focal_gamma": 2.0,
+                    "batch_size": profile.batch_size,
+                    "gradient_accumulation_steps": profile.grad_accum_steps,
+                    "parameter_count": parameter_count,
+                    "trainable_parameter_count": trainable_parameter_count,
+                    "pretrained_encoder_weights": not args.no_pretrained,
                 },
             )
 
@@ -419,6 +445,7 @@ def train():
         # Save best checkpoint
         if xview2_score > best_score:
             best_score = xview2_score
+            best_epoch = epoch + 1
             patience_counter = 0
             best_ckpt_path = out_dir / "checkpoint_best.pt"
             write_checkpoint(best_ckpt_path)
@@ -434,10 +461,60 @@ def train():
 
     writer.close()
 
+    best_checkpoint_path = out_dir / "checkpoint_best.pt"
+    training_summary = {
+        "data_mode": data_mode,
+        "xbd_root": str(Path(xbd_root).resolve()),
+        "source_split": split_meta.get("source_split"),
+        "model_version": f"siamese_unet_{profile.encoder}_v1",
+        "encoder": profile.encoder,
+        "num_classes": 5,
+        "class_names": DAMAGE_CLASS_NAMES,
+        "hardware_profile": profile.name,
+        "device": str(device),
+        "crop_size": current_crop_size,
+        "batch_size": profile.batch_size,
+        "gradient_accumulation_steps": profile.grad_accum_steps,
+        "effective_batch_size": profile.batch_size * profile.grad_accum_steps,
+        "mixed_precision": bool(profile.use_amp and device.type == "cuda"),
+        "optimizer": "AdamW",
+        "learning_rate": args.lr,
+        "weight_decay": 1e-4,
+        "scheduler": "linear_warmup_cosine",
+        "warmup_epochs": warmup_epochs,
+        "localization_loss_weight": 0.4,
+        "damage_loss_weight": 0.6,
+        "focal_gamma": 2.0,
+        "pretrained_encoder_weights": not args.no_pretrained,
+        "parameter_count": parameter_count,
+        "trainable_parameter_count": trainable_parameter_count,
+        "epochs_requested": total_epochs,
+        "epochs_completed": len(history),
+        "best_epoch": best_epoch,
+        "best_validation_xview2_score": best_score,
+        "training_tiles": len(train_dataset),
+        "validation_tiles": len(val_dataset),
+        "training_events": split_meta.get("train_events", []),
+        "validation_events": split_meta.get("val_events", []),
+        "split_warnings": split_meta.get("warnings", []),
+        "checkpoint": str(best_checkpoint_path.resolve()),
+        "checkpoint_hash": (
+            get_checkpoint_sha256(best_checkpoint_path)
+            if best_checkpoint_path.is_file()
+            else None
+        ),
+        "duration_sec": round(time.perf_counter() - run_started, 2),
+        "history": history,
+    }
+    summary_path = out_dir / "training_metrics.json"
+    summary_path.write_text(json.dumps(training_summary, indent=2), encoding="utf-8")
+
     # Final summary report
     print("\n" + "=" * 65)
     print("TRAINING RUN COMPLETE")
     print(f"  Best xView2 Score Achieved: {best_score:.4f}")
+    print(f"  Trainable Parameters:       {trainable_parameter_count:,}")
+    print(f"  Training Summary:           {summary_path.resolve()}")
     if epoch_durations:
         avg_s = sum(epoch_durations) / len(epoch_durations)
         print(f"  Measured Seconds Per Epoch:  {avg_s:.2f} s/epoch")

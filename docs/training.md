@@ -24,12 +24,59 @@ notebook is `ai-engine/notebooks/kaggle_xbd_training.ipynb`.
 ## 2. Data
 
 - `XBD_ROOT` (or `--xbd-root`) points at `./data/xbd`.
+- The supported root layout is `xbd/train/{images,labels,targets}` and, if
+  provided, `xbd/hold/{images,labels,targets}`. Matching pre/post images and
+  label JSON files are required. The trainer reads `train/`; it does not train
+  on `hold/`.
 - Splits are event-disjoint; see `docs/data.md` for the exact events and counts.
 - Normalisation statistics are fitted on training tiles only and stored in the
   checkpoint.
 - Masks are cached under `data/xbd_cache/` (override with `--cache-dir`).
+- `hold/` contains tile-level holdout data from events also found in `train/`.
+  The primary generalization metric is therefore the event-disjoint validation
+  subset carved from `train/`; `hold/` metrics are supplemental and must be
+  reported separately.
 
 ## 3. Training
+
+### Windows PowerShell (local dataset)
+
+From the `Rubicon\ai-engine` directory, set the path to the folder containing
+your `train` and `hold` directories:
+
+```powershell
+Set-Location C:\Users\LENOVO\Desktop\Rubicon\ai-engine
+$XbdRoot = "D:\datasets\xbd"
+
+python -m pip install -r requirements.txt
+python -m ai_engine.data.check --xbd-root $XbdRoot --samples 5 --crosscheck 5
+```
+
+Confirm the data check reports labeled pairs under `train/`, a non-empty
+event-disjoint train/validation split, and no unexpected mask errors. Then run
+the full dataset (no `--synthetic`, no reduced `--subset`, and no `--max-val`):
+
+```powershell
+python train.py --xbd-root $XbdRoot --config auto --epochs 30 --subset 1.0 `
+  --output-dir data/models/xbd --log-dir runs/xbd-mentor-demo
+```
+
+The trainer uses the detected hardware profile; CUDA is strongly recommended
+for a full run. ImageNet encoder weights are enabled by default and may need to
+download on first run. If that is not possible, add `--no-pretrained` and
+record that choice in your report. A missing or invalid dataset path now stops
+the run instead of silently training on synthetic data. A smoke run using
+`--subset` or `--max-val` is useful for checking the pipeline, but is not a
+full-data result.
+
+The run writes `data/models/xbd/training_metrics.json`, which records the
+dataset path and mode, model/parameter counts, hardware profile,
+hyperparameters, event and tile counts, split warnings, best epoch, and
+per-epoch training/validation history. `checkpoint_best.pt` is the checkpoint
+selected by event-disjoint validation; `checkpoint_last.pt` can resume
+training. Both are kept separate from the HSI/LiDAR model artifacts.
+
+### Existing CLI examples
 
 ```bash
 # Local GPU (auto-detected)
@@ -55,47 +102,64 @@ Outputs in `--output-dir` (default `data/models`):
 | `siamese_unet.pt` | same as best; serving artifact | no |
 | `model.pt` | same as best; legacy serving path | no |
 
-## 4. Checkpoint contract (v2)
+## 4. Evaluation and mentor demo
 
-```python
-{
-  "format_version": 2,
-  "model_version": "siamese_unet_resnet34_v1",
-  "encoder_name": "resnet34",
-  "num_classes": 5,
-  "damage_classes": ["background", "no-damage", "minor-damage",
-                     "major-damage", "destroyed"],
-  "config": {"encoder": ..., "crop_size": 512, "hardware_profile": ...,
-             "train_events": [...], "val_events": [...], "source_split": "train"},
-  "norm_mean": [r, g, b],
-  "norm_std":  [r, g, b],
-  "state_dict": {...},
-  "state_dict_hash": "a081915f1fa73d59",
-  # checkpoint_last.pt only:
-  "epoch": 0,
-  "optimizer_state_dict": {...},
-  "scheduler_state_dict": {...},
-  "scaler_state_dict": {...},
-  "metrics": {"xview2_score": ..., ...},
-}
+Run evaluation against the same xBD root. The default `val` split is
+event-disjoint and is the primary result. If you have `hold/`, evaluate it
+separately as a supplemental tile-level check:
+
+```powershell
+python eval.py --xbd-root $XbdRoot --checkpoint data/models/xbd/checkpoint_best.pt `
+  --split val --output-dir data/models/xbd/eval-val
+
+python eval.py --xbd-root $XbdRoot --checkpoint data/models/xbd/checkpoint_best.pt `
+  --split hold --output-dir data/models/xbd/eval-hold
 ```
+
+Each evaluation directory includes `metrics.json`, `confusion_matrix.png`,
+and prediction overlays. The JSON names the evaluated split, records the
+checkpoint hash and xView2 metrics, and gives tile/event counts. Do not combine
+the `val` and `hold` scores into one number or call the `hold/` score
+event-disjoint.
+
+For the mentor, show:
+
+- `training_metrics.json`: architecture, parameters, hyperparameters, data
+  split, hardware, training curves, and selected best epoch.
+- `eval-val/metrics.json`: the primary validation xView2 score, localization
+  F1, harmonic damage F1, per-class F1, and confusion matrix.
+- A few `eval-val/eval_overlay_*.png` files: pre/post imagery, ground truth,
+  and model predictions.
+- Optionally, the separate `eval-hold/metrics.json` and overlays, explicitly
+  labeled as supplemental tile-level hold results.
+
+### Serve the trained model in Rubicon
+
+Training places the serving checkpoint at `ai-engine/data/models/xbd/siamese_unet.pt`.
+The Compose satellite service is configured to load that directory. From the
+repository root, rebuild/restart it after training:
+
+```powershell
+docker compose up -d --build ai-engine-satellite
+Invoke-RestMethod http://localhost:8002/health
+```
+
+The health response should report `"model_loaded": true`. The backend's
+satellite upload flow forwards pre/post image pairs to this service; the
+legacy HSI/LiDAR engine remains separate. For a native local service instead
+of Docker, run from `ai-engine`:
+
+```powershell
+$env:RUBICON_MODEL_DIR = (Resolve-Path .\data\models\xbd).Path
+python -m uvicorn ai_engine.serve:app --host 127.0.0.1 --port 8002
+```
+
+## 5. Checkpoint contract (v2)
 
 Load with `ai_engine.model.checkpoint.load_checkpoint()`, which uses
 `weights_only=True`, accepts legacy `model_state_dict` checkpoints, and fills
 defaults for older files. `build_model_from_checkpoint()` constructs the
 matching architecture.
-
-## 5. Evaluation
-
-```bash
-python eval.py --checkpoint data/models/checkpoint_best.pt \
-  --output-dir docs/results
-```
-
-`docs/results/metrics.json` records the checkpoint hash, model version, encoder,
-class names, data mode (`real_xbd` / `synthetic`), source split, train and
-holdout events, tile count, split warnings, and the full xView2 metric block.
-`docs/results/` is gitignored.
 
 ## 6. Verified smoke run (real xBD, CPU)
 

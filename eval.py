@@ -27,7 +27,7 @@ from ai_engine.model.checkpoint import (
     load_checkpoint,
     norm_stats_from_checkpoint,
 )
-from ai_engine.data.splits import load_or_create_splits, get_xbd_root
+from ai_engine.data.splits import discover_xbd_tiles, load_or_create_splits, get_xbd_root
 from ai_engine.data.dataset import XBDDataset
 from ai_engine.data.synthetic import generate_synthetic_dataset
 
@@ -111,6 +111,12 @@ def evaluate():
     parser.add_argument("--output-dir", type=str, default="docs/results", help="Directory to save eval artifacts")
     parser.add_argument("--xbd-root", type=str, default=None, help="Root path to xBD dataset")
     parser.add_argument("--synthetic", action="store_true", help="Evaluate in synthetic mode")
+    parser.add_argument(
+        "--split",
+        choices=("val", "hold", "test"),
+        default="val",
+        help="Evaluate event-disjoint validation from train/, or a labeled hold/ or test/ split",
+    )
     parser.add_argument("--batch-size", type=int, default=2, help="Validation batch size")
     parser.add_argument("--max-tiles", type=int, default=None, help="Cap the number of validation tiles")
     parser.add_argument("--cache-dir", type=str, default="data/xbd_cache", help="Directory for cached rasterized masks")
@@ -148,45 +154,61 @@ def evaluate():
     if args.synthetic:
         xbd_root = generate_synthetic_dataset()
     else:
-        try:
-            xbd_root = get_xbd_root(args.xbd_root)
-        except FileNotFoundError:
-            xbd_root = generate_synthetic_dataset()
+        xbd_root = get_xbd_root(args.xbd_root)
 
     splits = load_or_create_splits(xbd_root=xbd_root)
     split_meta = splits.get("metadata", {})
-    val_manifest = splits["val"]
+    if args.split == "val":
+        eval_manifest = splits["val"]
+        eval_events = split_meta.get("val_events", [])
+    else:
+        eval_manifest = discover_xbd_tiles(xbd_root, split=args.split)
+        eval_events = sorted({tile["event"] for tile in eval_manifest})
+        if not eval_manifest:
+            raise ValueError(
+                f"No labeled xBD tiles found in split '{args.split}' under {xbd_root}."
+            )
     if args.max_tiles is not None:
-        val_manifest = val_manifest[: max(0, args.max_tiles)]
+        eval_manifest = eval_manifest[: max(0, args.max_tiles)]
 
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    val_dataset = XBDDataset(
-        tiles=val_manifest,
+    eval_dataset = XBDDataset(
+        tiles=eval_manifest,
         crop_size=cfg.get("crop_size", 512),
         is_train=False,
         cache_dir=cache_dir,
         norm_stats=(norm_mean, norm_std),
     )
-    val_loader = DataLoader(
-        val_dataset,
+    eval_loader = DataLoader(
+        eval_dataset,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=0,
     )
 
-    print(f"[INFO] Evaluating on {len(val_manifest)} event-disjoint validation tiles "
-          f"({', '.join(split_meta.get('val_events', []))})...")
-    for warning in split_meta.get("warnings", []):
-        print(f"[WARN] {warning}")
+    if args.split == "val":
+        print(f"[INFO] Evaluating on {len(eval_manifest)} event-disjoint validation tiles "
+              f"({', '.join(eval_events)})...")
+        for warning in split_meta.get("warnings", []):
+            print(f"[WARN] {warning}")
+    else:
+        print(f"[INFO] Evaluating on {len(eval_manifest)} labeled '{args.split}' split tiles "
+              f"({', '.join(eval_events)})...")
+        if args.split == "hold":
+            print(
+                "[WARN] xBD hold/ shares disaster event names with train/; "
+                "treat these tile-level hold metrics as supplemental, not the "
+                "primary event-disjoint generalization estimate."
+            )
 
     # 3. Evaluation loop
     metrics_meter = XView2Metrics()
     overlay_candidates = []
 
     with torch.no_grad():
-        for b_idx, (pre, post, loc_mask, dmg_mask) in enumerate(val_loader):
+        for b_idx, (pre, post, loc_mask, dmg_mask) in enumerate(eval_loader):
             pre = pre.to(device)
             post = post.to(device)
 
@@ -208,8 +230,8 @@ def evaluate():
             # Collect for qualitative overlays
             for i in range(len(pre)):
                 tile_idx = b_idx * args.batch_size + i
-                if tile_idx < len(val_manifest):
-                    tile_info = val_manifest[tile_idx]
+                if tile_idx < len(eval_manifest):
+                    tile_info = eval_manifest[tile_idx]
                     overlay_candidates.append({
                         "tile": tile_info,
                         "pred_loc": loc_probs[i, 0],
@@ -222,7 +244,7 @@ def evaluate():
     metrics = metrics_meter.compute()
 
     print("\n" + "=" * 65)
-    print("HOLDOUT EVALUATION RESULTS")
+    print(f"{args.split.upper()} EVALUATION RESULTS")
     print("=" * 65)
     print(f"  Official xView2 Score:       {metrics['xview2_score']:.4f}")
     print(f"  Localization F1:             {metrics['loc_f1']:.4f}")
@@ -241,10 +263,17 @@ def evaluate():
         "encoder": encoder_name,
         "class_names": checkpoint.get("damage_classes", DAMAGE_CLASS_NAMES),
         "data_mode": "synthetic" if args.synthetic else "real_xbd",
+        "evaluation_split": args.split,
+        "evaluation_events": eval_events,
+        "num_evaluation_tiles": len(eval_manifest),
         "source_split": split_meta.get("source_split"),
         "train_events": split_meta.get("train_events", []),
+        "validation_events": split_meta.get("val_events", []),
+        "num_validation_tiles": len(splits.get("val", [])),
+        # Retained for existing notebook consumers; historically these names
+        # referred to the event-disjoint validation subset.
         "holdout_events": split_meta.get("val_events", []),
-        "num_holdout_tiles": len(val_manifest),
+        "num_holdout_tiles": len(splits.get("val", [])),
         "split_warnings": split_meta.get("warnings", []),
         "results": metrics,
     }

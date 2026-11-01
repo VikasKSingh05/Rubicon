@@ -8,7 +8,7 @@
 
 ## 1. Executive Summary
 
-Rubicon is an end-to-end disaster damage assessment platform designed to provide rapid situational awareness to emergency responders. This audit reviews the pre-existing monorepo, evaluates its current services and test suites, verifies hardware and environment constraints, and sets the roadmap for replacing the legacy HSI/LiDAR Mamba-Transformer model with a modern, high-accuracy **Siamese U-Net** on optical satellite imagery (**xBD / xView2**) and drone inspection imagery, while preserving existing authentication, rate limiting, IPFS (Pinata CIDv0), and Polygon Amoy on-chain proof logic (**PramaanLedger**).
+Rubicon is an end-to-end disaster damage assessment platform designed to provide rapid situational awareness to emergency responders. The current primary optical satellite prototype uses a **Siamese U-Net** trained/evaluated on xBD (xView2), while a separate legacy Houston HSI/LiDAR Mamba-Transformer experiment remains in `ai-engine/src/`. Do not interpret the legacy model's checkpoint or metrics as xBD results. This audit contains historical implementation and test snapshots; see [`training.md`](training.md) for the current xBD workflow and artifact locations. No model-quality claim is implied by the architecture alone.
 
 ---
 
@@ -16,7 +16,8 @@ Rubicon is an end-to-end disaster damage assessment platform designed to provide
 
 | Service | Directory | Tech Stack | Entrypoint | Ports | Test Framework |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **AI Engine** | `ai-engine/` | Python 3.13, PyTorch, FastAPI, SMP, Rasterio | `src/inference.py` / `uvicorn` | 8000 | `pytest` (31 tests passing) |
+| **AI Engine (legacy)** | `ai-engine/` | Python, PyTorch, FastAPI, Rasterio | `src.inference:app` | 8000 | Historical test snapshot |
+| **Satellite Engine (xBD)** | `ai-engine/` | Python, PyTorch, FastAPI, SMP | `ai_engine.serve:app` | 8002 | `pytest` (see current test run) |
 | **Backend** | `backend/` | Node.js (ESM), Express, MongoDB (Mongoose), Ethers.js | `src/index.js` (app: `src/app.js`) | 4000 | Node test runner (`node --test`, 51 tests passing) |
 | **Agent Service** | `agent-service/` | Node.js (ESM), Express, LLM Providers (OpenRouter/Anthropic/OpenAI) | `src/index.js` | 8001 | Node test runner (`node --test`, 21 tests passing) |
 | **Frontend** | `frontend/` | React 18, Vite, TailwindCSS, Leaflet | `src/main.jsx` | 3000 | `vitest` (30 tests passing) + Vite build |
@@ -119,17 +120,17 @@ All 133 initial tests across the monorepo pass:
 
 ## 8. Phases 2–7 Implementation & Verification Summary
 
-### Phase 2: HSI & LiDAR Preprocessing Pipeline
+### Legacy Phase 2: HSI & LiDAR Preprocessing Pipeline
 - Implemented robust multi-modal reading and alignment for HSI (GeoTIFF) and LiDAR (`.las`/`.laz` via `laspy` with fallback parsing).
 - Houston 2013 dataset pipeline with spatial cropping, elevation normalization, and synthetic fallback generators.
 
-### Phase 3: Mamba-Transformer Fusion Model
+### Legacy Phase 3: Mamba-Transformer Fusion Model
 - Dual-encoder fusion architecture combining selective state-space layers (Mamba) for spectral feature modeling and spatial attention transformers for LiDAR point-cloud heights.
 - Hardware-adaptive training loop with fp16 AMP, gradient accumulation, and OOM recovery.
 
-### Phase 4: Siamese U-Net Architecture & xBD Pipeline
+### Primary Satellite Model: Siamese U-Net Architecture & xBD Pipeline
 - Siamese dual-branch ResNet34/ResNet18 U-Net for optical satellite disaster triage (`xBD` / `xView2`).
-- Joint loss function: Binary Cross-Entropy + Dice loss for building localization, Focal + Lovász softmax for 4-class damage classification (none, minor, major, destroyed).
+- Joint loss: BCE + Dice for building localization and class-weighted Cross-Entropy + Focal for five pixel channels (background, no-damage, minor, major, destroyed).
 
 ### Phase 5: Satellite Inference & H3 Hexagonal Grid Aggregation
 - Implemented `ai_engine/training/train.py` and `ai_engine/serve.py` exposing `POST /infer/satellite`.
@@ -195,4 +196,3 @@ The xBD pipeline was re-validated against the real archives in `data/xbd` (not s
 ### Known environment blocker (honest status)
 
 The local Python environment currently has `torch 2.10.0+cpu` and `torch.cuda.is_available() == False` despite the RTX 3050 being present. Therefore **no GPU training metrics exist yet**. A CUDA-enabled wheel must be installed (or training run on Kaggle) before any accuracy number can be claimed. CPU-only smoke runs are used to validate the training/eval plumbing, and are labelled as such.
-

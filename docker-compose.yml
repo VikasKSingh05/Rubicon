@@ -33,7 +33,7 @@ services:
     container_name: rubicon-ai-engine-sat
     environment:
       - PORT=8002
-      - RUBICON_MODEL_DIR=/app/data/models
+      - RUBICON_MODEL_DIR=/app/data/models/xbd
       - AI_ENGINE_MAX_MB=${MAX_UPLOAD_MB:-200}
     ports:
       - "${SAT_ENGINE_PORT:-8002}:8002"

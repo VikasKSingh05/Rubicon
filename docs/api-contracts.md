@@ -4,12 +4,13 @@
 > No feature code is written against a different shape. If a shape must change, update this
 > document **and** the mirrored artifacts in [`contracts/`](../contracts) in the same commit.
 >
-> These contracts are copied in during **Phase 0** ahead of implementation so all three
-> teammates (AI engine, backend, frontend, agent) build against the same interfaces.
+> This document includes the original legacy HSI/LiDAR `/predict` contract and the
+> current xBD satellite routes. For the mentor-facing model workflow, use the xBD
+> routes and model versions; the legacy Houston experiment is separate.
 
 ## Table of contents
 
-1. [AI engine `POST /predict` response](#1-ai-engine-post-predict-response)
+1. [Legacy AI engine `POST /predict` response](#1-legacy-hsilidar-ai-engine-post-predict-response)
 2. [Backend `POST /upload` response](#2-backend-post-upload-response)
 3. [Backend `GET /assessments` (list)](#3-backend-get-assessments-list)
 4. [Backend `GET /assessments/:id` (detail)](#4-backend-get-assessmentsid-detail)
@@ -21,11 +22,10 @@
 
 ---
 
-## 1. AI engine `POST /predict` response
+## 1. Legacy HSI/LiDAR AI engine `POST /predict` response
 
-`ai-engine` exposes a single inference endpoint at **`POST /predict`**. The backend calls it
-internally; the **frontend never talks to the AI engine directly** — it only ever receives an
-assessment via the backend.
+`POST /predict` is retained for the separate Houston HSI/LiDAR experiment on port 8000.
+It is **not** the xBD Siamese U-Net endpoint. The frontend does not call the engine directly.
 
 **Request body** (multipart `form-data`; the backend forwards the exact uploaded buffers):
 
@@ -55,8 +55,8 @@ assessment via the backend.
 }
 ```
 
-> `model_version` is `mamba_transformer-v1` when the real engine responds, or `stub-v0`
-> when the engine is unreachable and the backend degrades to the contract-identical stub.
+> The legacy model may report `mamba_transformer-v1`; the backend may return `stub-v0`
+> when that legacy service is unavailable. Neither value indicates xBD model inference.
 
 | Field             | Type                 | Notes                                                |
 | ----------------- | -------------------- | ---------------------------------------------------- |
@@ -64,19 +64,32 @@ assessment via the backend.
 | `confidence`      | number (0–1)         | Model confidence in the predicted class.             |
 | `class_probs`     | object<string,number>| Softmax probabilities across all damage classes.     |
 | `geojson_polygon` | GeoJSON Polygon      | Map polygon for the assessed zone (lng, lat coords). |
-| `model_version`   | string               | Real model: `mamba_transformer-v1`. When the engine is unreachable the backend degrades to `stub-v0`. |
+| `model_version`   | string               | Legacy HSI/LiDAR model identifier or `stub-v0`; not an xBD model version. |
 
-**Contract guarantee:** swapping the Phase-1 stub for the real Phase-3 model requires **zero**
-frontend changes, because the response shape never changes.
+### 1.1 xBD satellite Siamese U-Net
+
+The primary optical satellite inference service runs on port 8002 at
+**`POST /infer/satellite`**, accepting multipart fields `pre` and `post` (PNG,
+JPEG, or GeoTIFF). The authenticated backend proxy is **`POST /satellite`**;
+the main assessment upload endpoint **`POST /upload`** also accepts the same
+`pre`/`post` pair and forwards it to the satellite service.
+
+The xBD response contains image hashes, building and H3-cell GeoJSON,
+`damage_classes`, and `model_version`. See the exact response schema in
+[`contracts/satellite.response.json`](../contracts/satellite.response.json).
+When no serving checkpoint is present, the engine may return
+`stub-satellite-v0`; check `GET /health` on port 8002 for `model_loaded: true`
+before presenting a request as trained-model inference.
 
 ---
 
 ## 2. Backend `POST /upload` response
 
-The backend accepts an uploaded scan (hyperspectral + LiDAR, extensions
-`.tif/.tiff/.las/.laz`) at **`POST /upload`** and returns the created assessment.
+The backend accepts an xBD image pair (`pre` and `post`; PNG, JPEG, or TIFF)
+at **`POST /upload`** and returns the created assessment. It also retains
+`hsi` + `lidar` fields for the separate legacy experiment.
 
-**Request:** `multipart/form-data` with fields `hsi` and `lidar` (files).
+**Request:** `multipart/form-data` with fields `pre` and `post` (files).
 
 **Response `201 Created`** — exact shape:
 
@@ -84,18 +97,19 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, extensions
 {
   "assessmentId": "665d8f3e2f3a4b5c6d7e8f90",
   "state": "analyzed",
-  "prediction": "Severe Collapse",
+  "prediction": "Destroyed",
   "confidence": 0.91,
   "class_probs": {
-    "None": 0.02,
-    "Moderate": 0.07,
-    "Severe Collapse": 0.91
+    "No Damage": 0.02,
+    "Minor Damage": 0.03,
+    "Major Damage": 0.04,
+    "Destroyed": 0.91
   },
   "geojson_polygon": {
     "type": "Polygon",
     "coordinates": [[[lng, lat], [lng, lat], [lng, lat], [lng, lat]]]
   },
-  "model_version": "stub-v0",
+  "model_version": "siamese-resnet34-unet-xbd",
   "createdAt": "2026-09-07T12:00:00.000Z",
   "links": {
     "detail": "/assessments/665d8f3e2f3a4b5c6d7e8f90"
@@ -103,10 +117,11 @@ The backend accepts an uploaded scan (hyperspectral + LiDAR, extensions
 }
 ```
 
-> The analysis step is **real**: the backend forwards the uploaded files to `POST /predict`
-> and stores the engine's response. `state` is `analyzed` (or `chain_logged` when the Amoy
-> proof layer is configured — see §7). If the engine is unreachable the backend degrades to
-> the contract-identical stub (`model_version: "stub-v0"`).
+> For xBD uploads, the backend forwards `pre` and `post` to the satellite
+> Siamese U-Net service and stores its result. If the checkpoint/service is
+> unavailable, the response identifies the stub model instead. Legacy
+> `hsi`/`lidar` uploads follow the separate `/predict` path. `state` is
+> `analyzed` (or `chain_logged` when the Amoy proof layer is configured; see §7).
 
 | Field      | Type                        | Notes                                        |
 | ---------- | --------------------------- | -------------------------------------------- |

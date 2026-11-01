@@ -10,7 +10,8 @@ required secrets, TLS, backups, and key rotation.
 Browser (TLS)  ───► │  nginx/Caddy │──► frontend:3000 (static, served by node)
                     └─────────────┘──► backend:4000   (REST + auth)
                                       ├─ mongodb:27017 (state + refresh sessions + chain cursor)
-                                      ├─ ai-engine:8000 (FastAPI inference)
+                                      ├─ ai-engine-satellite:8002 (xBD Siamese U-Net inference)
+                                      ├─ ai-engine:8000 (legacy HSI/LiDAR inference)
                                       └─ agent-service:8001 (tool-grounded LLM agent)
 ```
 
@@ -39,7 +40,7 @@ uploaded artifacts live on named/`STORAGE_DIR` volumes.
 | `AMOY_RPC_URL` / `DEPLOYER_PRIVATE_KEY` / `CONTRACT_ADDRESS` | Polygon Amoy on-chain proof | backend + `contracts/scripts/deploy.js` |
 | `LLM_PROVIDER` + its key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`) | conversational agent | agent-service |
 | `BACKEND_URL` | agent-service → backend base URL (`docker compose` sets `http://backend:4000`) | agent-service |
-| `RUBICON_MODEL_DIR` / `AI_ENGINE_MAX_MB` | model-artifact directory / max upload size for the engine | ai-engine |
+| `RUBICON_MODEL_DIR` / `AI_ENGINE_MAX_MB` | satellite model directory (default `ai-engine/data/models/xbd`) / max upload size | xBD satellite engine |
 | `VITE_API_URL` / `VITE_AGENT_URL` | **build-time** browser→API/agent URLs (default `http://localhost:4000` / `:8001` baked into `dist` if unset) | frontend build |
 
 If `AMOY_RPC_URL`/key/contract are all unset the backend runs a deterministic
@@ -98,7 +99,7 @@ back on same-site (top-level) requests over TLS.
 - **Mongo**: snapshot regularly, e.g. `docker compose exec mongodb mongodump --archive --db rubicon | gzip > dump.gz`; restore with `mongorestore`.
   This also backs up refresh sessions (so logout/rotation survive restore) and
   the `ChainIndex` scan cursor used by `verifyOnChain`.
-- **Originals**: `STORAGE_DIR` holds the uploaded HSI/LiDAR evidence; back it up
+- **Originals**: `STORAGE_DIR` holds uploaded image or HSI/LiDAR evidence; back it up
   with the Mongo dump so a restore is complete.
 - **On-chain**: Amoy is a public ledger — CIDs and predictions remain readable
   from `AssessmentLogged` events even if a database is lost.

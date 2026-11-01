@@ -39,7 +39,7 @@ _sat_runtime_error: str | None = None
 
 
 def _default_model_dir() -> Path:
-    return Path(__file__).resolve().parents[1] / "data" / "models"
+    return Path(__file__).resolve().parents[1] / "data" / "models" / "xbd"
 
 
 def get_sat_runtime() -> dict | None:

@@ -1,6 +1,6 @@
 # Rubicon — Comprehensive System Architecture, Codebase Blueprint & Viva Guide
 
-> **Project Mission**: Autonomous Disaster Assessment with an Immutable Proof System. Rubicon ingests pre-disaster and post-disaster optical satellite image pairs from the benchmark **xBD (xView2)** dataset, performs building localization and 4-tier damage severity classification via a **Dual-Task Siamese U-Net (ResNet-34 shared weights)** deep learning architecture, pins raw sensory evidence to IPFS, records cryptographic proofs on the Polygon Amoy blockchain, renders interactive spatial GIS damage polygons on a Leaflet map, and provides a tool-grounded AI assistant for situational command.
+> **Project Mission**: Disaster assessment with an immutable proof system. The primary satellite prototype ingests paired pre- and post-disaster optical imagery, performs building localization and four-level xBD damage classification with a **Dual-Task Siamese U-Net**, and connects the resulting assessment to the map, optional IPFS/Polygon proof flow, and tool-grounded AI assistant. The encoder is selected from the available hardware profile (ResNet-18 on CPU, ResNet-34 on supported GPU profiles).
 
 ---
 
@@ -52,8 +52,8 @@ flowchart TD
         Backend -->|Store User & Assessments| Mongo[("MongoDB :27017")]
         Backend -->|Spool Multipart Files| LocalStorage["Local Disk Storage (/storage)"]
         
-        Backend -->|POST /predict (Multipart HSI+LiDAR)| AIEngine["AI Engine (FastAPI :8000)"]
-        Backend -->|POST /satellite| AIEngineSat["Satellite Engine (:8002)"]
+        Backend -->|POST /infer/satellite (pre + post)| AIEngineSat["xBD Satellite Engine (FastAPI :8002)"]
+        Backend -.->|Legacy HSI/LiDAR POST /predict| AIEngine["Legacy Engine (FastAPI :8000)"]
         
         Backend -->|Compute CIDv0 & Pin Buffer| IPFS["IPFS / Pinata Gateway"]
         Backend -->|logAssessment(tx)| Polygon["Polygon Amoy Testnet (Chain ID 80002)"]
@@ -103,7 +103,7 @@ flowchart TD
   - **[`upload.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/upload.js)**: Multi-part disk spooling via Multer, magic-byte validation, AI inference coordination, IPFS CID hashing, on-chain logging, and file persistence.
   - **[`assessments.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/assessments.js)**: Pagination, filtering by severity, single assessment detail retrieval, H3 hexagonal cell extraction (`/cells`), and on-chain verification trigger (`/verify`).
   - **[`chain.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/chain.js)**: Exposes `/chain/status` to report current Polygon Amoy connectivity, contract address, and latest block.
-  - **[`files.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/files.js)**: Secure streaming endpoint allowing authorized users to download original raw HSI and LiDAR files from storage.
+  - **`backend/src/routes/files.js`**: Secure, owner-scoped streaming endpoint for persisted upload originals. HSI/LiDAR file types are retained for the legacy scan contract; xBD assessments use pre/post optical images.
   - **[`satellite.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/satellite.js)**: Accepts pre-disaster and post-disaster optical/satellite image pairs for building change detection and damage assessment.
   - **[`drone.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/drone.js)**: High-resolution drone imagery triage endpoint linking targeted drone inspections to specific H3 hexagon cells.
 * **Models (`backend/src/models/`)**:
@@ -157,19 +157,10 @@ flowchart TD
 ---
 
 ### 3.5 Deep Learning AI Engine (`ai-engine/`)
-* **[`ai-engine/src/inference.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/inference.py)**: FastAPI service on port 8000 exposing `POST /predict`. Receives HSI and LiDAR uploads, manages temporary files, loads model runtime, runs inference per patch, and returns GeoJSON polygons with class probabilities.
-* **Model Architecture (`ai-engine/src/model/`)**:
-  - **[`mamba.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/model/mamba.py)**: Selective State Space Model (SSM) processing the continuous spectral dimension of hyperspectral imagery in $O(N)$ linear time.
-  - **[`fusion.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/model/fusion.py)**: Multimodal cross-attention fusion block. Combines continuous spectral feature vectors from the Mamba branch with spatial/elevation geometric features from the LiDAR branch.
-  - **[`baseline.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/model/baseline.py)**: Standard ResNet / 2D CNN baseline model used for comparative performance benchmarking in research evaluations.
-  - **[`factory.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/model/factory.py)**: Model initialization factory instantiating the requested architecture from config files.
-  - **[`serving.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/model/serving.py)**: Runtime model loader. Loads weights (`model.pt`), PCA projection matrices (`pca.pkl`), and metadata (`metrics.json`), executing inference batches across spatial patches.
-* **Preprocessing Pipeline (`ai-engine/src/preprocessing/`)**:
-  - **[`load_hsi.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/preprocessing/load_hsi.py)**: Reads multi-band GeoTIFF files using Rasterio, normalizes reflectance values, and fits/applies 3D Principal Component Analysis (PCA) to reduce 144 spectral bands to 30 salient components.
-  - **[`load_lidar.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/preprocessing/load_lidar.py)**: Reads LAS/LAZ point clouds via Laspy and rasterizes point elevations ($Z$), intensity, and return counts into aligned digital surface models (DSM).
-  - **[`align.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/preprocessing/align.py)**: Reprojects and spatially resamples disparate HSI and LiDAR grids to matching spatial resolutions and bounding coordinates.
-  - **[`patchify.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/preprocessing/patchify.py)**: Slices large raster extents into overlapping $11 \times 11$ or $15 \times 15$ pixel spatial patches for neural network input tensors.
-  - **[`dataset.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/ai-engine/src/preprocessing/dataset.py)**: PyTorch `Dataset` and `DataLoader` implementations supporting data augmentation (random flips, rotations).
+* **Primary xBD model**: `ai-engine/ai_engine/model/siamese_unet.py` defines the shared ResNet encoder, multi-scale temporal feature fusion, U-Net decoder, and localization/damage heads. `ai-engine/ai_engine/training/train.py` provides training; the repository-root `train.py` CLI writes best, last, and serving checkpoints plus `training_metrics.json`.
+* **xBD data and evaluation**: `ai-engine/ai_engine/data/` discovers labeled pre/post image pairs, rasterizes xBD polygon labels, and creates disaster-event-disjoint train/validation splits. The repository-root `eval.py` evaluates `val`, `hold`, or `test` and writes metrics, a confusion matrix, and prediction overlays. `hold/` is a supplemental tile-level split, not an unseen-event test.
+* **Satellite inference**: `ai-engine/ai_engine/serve.py` serves `POST /infer/satellite` on port 8002. It loads `siamese_unet.pt` from `RUBICON_MODEL_DIR` (default `ai-engine/data/models/xbd`) and returns building/cell GeoJSON. `Dockerfile.satellite` packages this service. If no checkpoint exists, the endpoint responds with a clearly versioned stub; it is not model inference.
+* **Separate legacy experiment**: `ai-engine/src/` contains the Houston 2013 HSI/LiDAR preprocessing and Mamba/Transformer model exposed through the legacy `/predict` service on port 8000. It is not the xBD Siamese U-Net and its model/checkpoint/metrics must not be used to claim xBD training results.
 
 ---
 
@@ -195,19 +186,22 @@ flowchart TD
 
 ## 4. The Machine Learning Deep Dive
 
-### 4.1 Datasets: xBD (xView2) Core Architecture vs. Airborne Sensors
+### 4.1 Primary Dataset: xBD (xView2)
 
-Rubicon's primary damage triage pipeline is built on the **xBD (xView2)** benchmark dataset, utilizing pre-disaster and post-disaster optical satellite pairs:
+The xBD pipeline uses paired pre-disaster and post-disaster optical RGB satellite
+tiles with polygon labels. HSI/LiDAR refers to a separate legacy experiment,
+not an input to this Siamese U-Net.
 
-| Metric | xBD / xView2 (Primary Architecture) | Airborne Modality (Supplemental) |
-|---|---|---|
-| **Role in Rubicon** | **Core Primary Damage Assessment Pipeline** | Supplemental Airborne Sensor Pipeline |
-| **Sensory Modality** | Pre- and Post-Disaster Optical Satellite Imagery | Hyperspectral Imagery (HSI) + Airborne LiDAR |
-| **Spectral Depth** | 3-channel RGB (pre-disaster) + 3-channel RGB (post-disaster) | 144 contiguous bands (380 nm – 1050 nm) + elevation |
-| **Spatial Resolution** | 0.5 m – 0.8 m GSD ($1024 \times 1024$ image tiles) | 2.5 m Ground Sample Distance (GSD) |
-| **Target Classes** | 4 Classes: `No Damage`, `Minor Damage`, `Major Damage`, `Destroyed` | 3 Classes: `None`, `Moderate`, `Severe Collapse` |
-| **Input Files** | `.png`/`.jpg`/`.tif` (Pre-disaster) + `.png`/`.jpg`/`.tif` (Post-disaster) | `.tif`/`.tiff` (HSI) + `.las`/`.laz` (LiDAR) |
-| **Service Endpoint** | `POST /infer/satellite` & `POST /upload` | `POST /predict` (legacy fallback) |
+| Property | xBD implementation |
+|---|---|
+| **Inputs** | Paired pre/post RGB images (`.png`, `.jpg`, `.tif`, `.tiff`) and xBD JSON labels |
+| **Network input** | Three-channel pre and post tensors; crop size selected by hardware profile |
+| **Encoder** | Shared ResNet-18 (CPU profile) or ResNet-34 (GPU profiles) |
+| **Outputs** | Binary building-localization mask and five-way per-pixel damage logits |
+| **Damage channels** | `0: background`, `1: no-damage`, `2: minor-damage`, `3: major-damage`, `4: destroyed` |
+| **Training entry point** | `python train.py --xbd-root <path>` from `ai-engine/` |
+| **Evaluation entry point** | `python eval.py --xbd-root <path> --split val` from `ai-engine/` |
+| **Inference endpoint** | `POST /infer/satellite` on the satellite engine (`:8002`) |
 
 ---
 
@@ -276,8 +270,9 @@ Rubicon implements the dual-task Siamese U-Net change-detection architecture ill
 
 #### Training Pipeline (`train.py` & `ai_engine/model/`):
 - **Hardware Auto-Detection**: Dynamic profiles for Local RTX 3050 (6GB VRAM, crop size 512 with automatic fallback to 384/256 on CUDA OOM), Kaggle GPU (16GB+ VRAM), and CPU fallback.
-- **Optimization**: AdamW with learning rate $3 \times 10^{-4}$, Cosine Annealing with 1-epoch warmup, Automatic Mixed Precision (AMP fp16), channels_last memory format, and gradient clipping (max norm 1.0).
+- **Optimization**: AdamW (default learning rate $3 \times 10^{-4}$, weight decay $10^{-4}$), one-epoch warmup followed by cosine scheduling, localization/damage loss weights 0.4/0.6, focal gamma 2.0, and gradient clipping (max norm 1.0). AMP is enabled on supported CUDA profiles.
 - **Validation Metric**: Comprehensive xView2 evaluation metric ($F_1^{\text{loc}}$ and harmonic mean $F_1^{\text{dmg}}$ across damage classes).
+- **Reproducibility report**: `training_metrics.json` records actual data mode, tiles/events, hardware, parameter count, hyperparameters, epoch history, best epoch, and checkpoint hash. The evaluator writes separate results for `val`, `hold`, and `test`.
 
 ### 4.3 Exploratory Data Analysis (EDA)
 
@@ -287,7 +282,7 @@ The EDA pipeline (`ai-engine/scripts/eda_xbd.py` and `ai-engine/notebooks/eda.ip
 |---|---|
 | **Class Distribution** | Counts and percentages for No Damage, Minor Damage, Major Damage, Destroyed |
 | **Polygon Area Statistics** | Mean and median building footprint pixel area per damage class |
-| **Spectral Delta Histogram** | Pre vs Post intensity difference `\|I_post - I_pre\|` distribution |
+| **Temporal Image Delta** | Pre vs Post image intensity difference `\|I_post - I_pre\|` distribution |
 | **Disaster Event Representation** | Frequency of each disaster event (hurricanes, earthquakes, floods) |
 | **Optimal Class Weights** | Inverse-frequency weights $w_c = \frac{N}{K \cdot N_c}$ for `RubiconLoss` |
 
@@ -303,25 +298,29 @@ jupyter notebook ai-engine/notebooks/eda.ipynb
 
 ### 4.4 Hyperparameter Tuning Pipeline
 
-The tuning script (`ai-engine/scripts/tune_hyperparams.py`) performs randomized grid search over the following search space:
+The xBD tuning script (`ai-engine/scripts/tune_hyperparams.py`) samples the
+following candidate space. These are brief trial runs (a few batches per trial),
+not full model training and not final performance evidence.
 
-| Hyperparameter | Search Values | Default |
+| Hyperparameter | Search Values |
 |---|---|---|
-| **Encoder Backbone** | `resnet18`, `resnet34` | `resnet34` |
-| **Learning Rate** | $1 \times 10^{-4}$, $3 \times 10^{-4}$, $5 \times 10^{-4}$ | $3 \times 10^{-4}$ |
-| **Task Loss $\alpha$ (loc\_weight)** | 0.3, 0.4, 0.5 | 0.4 |
-| **Focal $\gamma$** | 1.5, 2.0, 2.5 | 2.0 |
-| **Weight Decay** | $1 \times 10^{-4}$, $1 \times 10^{-3}$ | $1 \times 10^{-4}$ |
+| **Encoder Backbone** | `resnet18`, `resnet34` |
+| **Learning Rate** | $1 \times 10^{-4}$, $3 \times 10^{-4}$, $5 \times 10^{-4}$ |
+| **Localization Loss Weight** | 0.3, 0.4, 0.5 (damage weight is the remainder) |
+| **Focal $\gamma$** | 1.5, 2.0, 2.5 |
+| **Weight Decay** | $1 \times 10^{-4}$, $1 \times 10^{-3}$ |
 
-Objective: Maximize validation xView2 metric:
-$$F_1^{\text{total}} = 0.3 \times F_1^{\text{loc}} + 0.7 \times F_1^{\text{dmg}}$$
+The script ranks candidates by its reported validation xView2 score. The full
+training CLI's defaults and run artifacts are documented in
+[`docs/training.md`](docs/training.md).
 
-Run tuning:
+Run a short synthetic pipeline check:
 ```bash
 python ai-engine/scripts/tune_hyperparams.py --synthetic --trials 5 --dry-run
 ```
 
-Results are saved to `runs/hyperparam_tuning_results.json` with a ranked leaderboard of all trials.
+For a real dataset use `--xbd-root <path> --trials 5 --output <json-path>`.
+The tuning CLI does not accept `--epochs`, `--data-dir`, or `--device`.
 
 ---
 
@@ -428,7 +427,8 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 
 | Layer | Primary Technology | Degradation Trigger | Fallback Behavior |
 |---|---|---|---|
-| **AI Inference** | PyTorch Mamba-Transformer (`:8000`) | Service offline, model missing, or CUDA OOM | Automatically invokes `stubPredict()`, returning contract-identical randomized Houston damage polygons. |
+| **Satellite Inference (xBD)** | Siamese U-Net (`:8002`) | Checkpoint absent | Returns a versioned empty stub response; this is not trained-model inference. |
+| **Legacy Inference** | HSI/LiDAR Mamba-Transformer (`:8000`) | Legacy service/model unavailable | Uses the separate contract-compatible `stubPredict()` fallback; these results are not xBD predictions. |
 | **IPFS Pinning** | Pinata IPFS Cloud Gateway | `PINATA_JWT` unset or API rate limited | Generates deterministic cryptographic CIDv0 locally via SHA-256 + base58; marks upload as local-only. |
 | **Blockchain** | Polygon Amoy Testnet (Chain 80002) | RPC offline, wallet unfunded, or key unset | Writes a deterministic simulated on-chain record; flags record as `simulated: true` without failing upload. |
 | **AI Assistant** | Claude Sonnet / GPT-4o | API key unset or network timeout | Switches to `fallback.js` deterministic heuristic agent, answering strictly from live database tool calls. |
@@ -440,7 +440,7 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 ### Architecture & System Design
 
 #### Q1: What is Rubicon in one sentence?
-**Answer:** Rubicon is an autonomous multimodal disaster assessment platform that combines Hyperspectral and LiDAR sensor imagery via a hybrid Mamba–Transformer model, records tamper-proof cryptographic evidence to IPFS and Polygon blockchain, and visualizes damage via a GIS map dashboard and tool-grounded AI assistant.
+**Answer:** Rubicon's primary computer-vision prototype assesses paired pre- and post-disaster optical imagery with an xBD Siamese U-Net, then presents assessment results through a GIS dashboard and tool-grounded assistant. Optional IPFS and Polygon Amoy integrations provide evidence records. A separate legacy HSI/LiDAR experiment remains in the repository but is not the xBD model.
 
 #### Q2: Why did you divide the system into four separate microservices instead of a single monolith?
 **Answer:** The architecture separates distinct computational concerns:
@@ -464,7 +464,7 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 **Answer:** Disaster assessment is fundamentally a temporal change detection problem. Single post-event images cannot reliably distinguish whether an empty lot was always empty or previously had a building that was completely leveled. The xBD dataset pairs pre-disaster optical imagery (providing baseline building geometry) with post-disaster imagery. Our Siamese architecture extracts features from both epochs and analyzes the difference $|F_{\text{post}} - F_{\text{pre}}|$ to isolate structural damage.
 
 #### Q5: How does the Siamese U-Net architecture operate, and why use shared weights?
-**Answer:** In `ai_engine/model/siamese_unet.py`, a single ResNet-34 encoder with shared weights processes both the pre- and post-disaster images. Sharing weights forces the encoder to project both temporal images into an identical feature space, ensuring that spatial activations represent actual physical differences between epochs rather than divergent feature representations.
+**Answer:** In `ai_engine/model/siamese_unet.py`, one shared-weight ResNet encoder processes both pre- and post-disaster images. The hardware profile selects ResNet-18 for CPU fallback and ResNet-34 for supported GPU profiles. Shared weights project both temporal images into the same feature space before multi-scale fusion.
 
 #### Q6: How does multi-scale feature difference fusion work?
 **Answer:** At each of the 4 hierarchical feature stages ($F_1$ to $F_4$), the network computes the element-wise absolute difference $\text{diff} = |F_{\text{post}} - F_{\text{pre}}|$ and concatenates $[F_{\text{pre}}, F_{\text{post}}, \text{diff}]$. This concatenated representation is passed via skip connections into the U-Net decoder, preserving fine-grained edge details and high-level semantic damage indicators.
@@ -549,7 +549,7 @@ This ensures that only authentic sensor files enter the processing pipeline.
 **Answer:** Located at `backend/src/app.js`, `/metrics` provides a Prometheus-compatible plain-text metrics exposition tracking service uptime in seconds, total uploads accepted, completed blockchain proofs, and total application errors.
 
 #### Q23: Why do we have separate `Dockerfile` and `Dockerfile.satellite` in `ai-engine/`?
-**Answer:** The main `ai-engine` Dockerfile packages PyTorch, Mamba, and the multimodal fusion pipeline for HSI and LiDAR. `Dockerfile.satellite` packages a specialized computer vision pipeline tailored for optical satellite image pairs (`pre` and `post` disaster imagery) using change detection and building damage segmentation models.
+**Answer:** `Dockerfile.satellite` packages the xBD Siamese U-Net API, served on port 8002 and configured to load the checkpoint from `RUBICON_MODEL_DIR`. The separate main `Dockerfile` packages the legacy HSI/LiDAR `/predict` service on port 8000; its model artifacts are independent of the xBD checkpoint.
 
 #### Q24: What is the purpose of `tests/auth-hardening.test.js` in the backend?
 **Answer:** It uses `supertest` and `mongodb-memory-server` to rigorously verify session security:

@@ -19,10 +19,13 @@ foreach ($dp in $DockerPaths) {
 
 if ($Local) {
     Write-Host "Starting Rubicon services locally..." -ForegroundColor Cyan
-    Write-Host "Note: If AI engine Python dependencies are not installed locally, backend automatically uses deterministic AI stub." -ForegroundColor DarkGray
+    Write-Host "Note: The satellite engine uses a stub until ai-engine\data\models\xbd\siamese_unet.pt exists." -ForegroundColor DarkGray
     
-    Write-Host "Starting AI Engine on port 8000..." -ForegroundColor Yellow
+    Write-Host "Starting legacy HSI/LiDAR Engine on port 8000..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "cd '$Root\ai-engine'; python -m uvicorn src.inference:app --host 0.0.0.0 --port 8000"
+
+    Write-Host "Starting xBD Satellite Engine on port 8002..." -ForegroundColor Yellow
+    Start-Process powershell -ArgumentList "-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "cd '$Root\ai-engine'; `$env:RUBICON_MODEL_DIR = '$Root\ai-engine\data\models\xbd'; python -m uvicorn ai_engine.serve:app --host 0.0.0.0 --port 8002"
     
     Write-Host "Starting Backend on port 4000..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "cd '$Root\backend'; cmd.exe /c npm start"
