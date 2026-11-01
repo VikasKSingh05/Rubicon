@@ -1,0 +1,180 @@
+{
+  "xbd_root": "C:\\Users\\LENOVO\\Desktop\\Rubicon\\data\\xbd",
+  "source_split": "train",
+  "inventory": {
+    "train": 2799,
+    "hold": 933
+  },
+  "events": {
+    "train": {
+      "guatemala-volcano": 18,
+      "hurricane-florence": 319,
+      "hurricane-harvey": 319,
+      "hurricane-matthew": 238,
+      "hurricane-michael": 343,
+      "mexico-earthquake": 121,
+      "midwest-flooding": 279,
+      "palu-tsunami": 113,
+      "santa-rosa-wildfire": 226,
+      "socal-fire": 823
+    },
+    "hold": {
+      "guatemala-volcano": 5,
+      "hurricane-florence": 119,
+      "hurricane-harvey": 95,
+      "hurricane-matthew": 94,
+      "hurricane-michael": 109,
+      "mexico-earthquake": 34,
+      "midwest-flooding": 86,
+      "palu-tsunami": 41,
+      "santa-rosa-wildfire": 77,
+      "socal-fire": 273
+    }
+  },
+  "split": {
+    "schema_version": 2,
+    "split_mode": "event",
+    "event_disjoint": true,
+    "source_split": "train",
+    "total_tiles": 2799,
+    "total_events": 10,
+    "train_count": 2565,
+    "val_count": 234,
+    "train_tiles": 2565,
+    "val_tiles": 234,
+    "train_events": [
+      "guatemala-volcano",
+      "hurricane-florence",
+      "hurricane-harvey",
+      "hurricane-matthew",
+      "hurricane-michael",
+      "midwest-flooding",
+      "santa-rosa-wildfire",
+      "socal-fire"
+    ],
+    "val_events": [
+      "mexico-earthquake",
+      "palu-tsunami"
+    ],
+    "train_ratio_target": 0.8,
+    "val_fraction": 0.0836,
+    "seed": 42,
+    "warnings": []
+  },
+  "crosscheck": {
+    "available": true,
+    "tiles": 6,
+    "loc_agreement_pct": 99.9991,
+    "dmg_agreement_pct": 99.9329,
+    "per_class_iou": {
+      "background": 0.9993,
+      "no-damage": 0.9848,
+      "minor-damage": 1.0,
+      "major-damage": 1.0,
+      "destroyed": 1.0
+    },
+    "rows": [
+      {
+        "tile_id": "socal-fire_00001118",
+        "event": "socal-fire",
+        "loc_match_pct": 100.0,
+        "dmg_match_pct": 99.9713,
+        "dmg_mismatch_px": 301
+      },
+      {
+        "tile_id": "hurricane-florence_00000369",
+        "event": "hurricane-florence",
+        "loc_match_pct": 100.0,
+        "dmg_match_pct": 100.0,
+        "dmg_mismatch_px": 0
+      },
+      {
+        "tile_id": "mexico-earthquake_00000158",
+        "event": "mexico-earthquake",
+        "loc_match_pct": 99.9988,
+        "dmg_match_pct": 100.0,
+        "dmg_mismatch_px": 0
+      },
+      {
+        "tile_id": "hurricane-matthew_00000401",
+        "event": "hurricane-matthew",
+        "loc_match_pct": 99.9995,
+        "dmg_match_pct": 100.0,
+        "dmg_mismatch_px": 0
+      },
+      {
+        "tile_id": "hurricane-matthew_00000187",
+        "event": "hurricane-matthew",
+        "loc_match_pct": 100.0,
+        "dmg_match_pct": 100.0,
+        "dmg_mismatch_px": 0
+      },
+      {
+        "tile_id": "hurricane-matthew_00000044",
+        "event": "hurricane-matthew",
+        "loc_match_pct": 99.9963,
+        "dmg_match_pct": 99.6262,
+        "dmg_mismatch_px": 3920
+      }
+    ]
+  },
+  "hold_crosscheck": {
+    "available": true,
+    "tiles": 3,
+    "loc_agreement_pct": 99.3534,
+    "dmg_agreement_pct": 99.3323,
+    "per_class_iou": {
+      "background": 0.9923,
+      "no-damage": 0.9488,
+      "minor-damage": 1.0,
+      "major-damage": 1.0,
+      "destroyed": 1.0
+    },
+    "rows": [
+      {
+        "tile_id": "hurricane-michael_00000108",
+        "event": "hurricane-michael",
+        "loc_match_pct": 99.9998,
+        "dmg_match_pct": 99.9764,
+        "dmg_mismatch_px": 247
+      },
+      {
+        "tile_id": "hurricane-harvey_00000183",
+        "event": "hurricane-harvey",
+        "loc_match_pct": 98.0603,
+        "dmg_match_pct": 98.0206,
+        "dmg_mismatch_px": 20756
+      },
+      {
+        "tile_id": "hurricane-michael_00000457",
+        "event": "hurricane-michael",
+        "loc_match_pct": 100.0,
+        "dmg_match_pct": 100.0,
+        "dmg_mismatch_px": 0
+      }
+    ]
+  },
+  "histogram": {
+    "tiles_inspected": 200,
+    "pixel_counts": {
+      "0": 162545090,
+      "1": 45054641,
+      "2": 174800,
+      "3": 441691,
+      "4": 1498978
+    },
+    "tile_presence": {
+      "1": 193,
+      "2": 26,
+      "3": 53,
+      "4": 56
+    }
+  },
+  "overlays": [
+    "C:\\Users\\LENOVO\\Desktop\\Rubicon\\docs\\samples\\sample_overlay_1.png",
+    "C:\\Users\\LENOVO\\Desktop\\Rubicon\\docs\\samples\\sample_overlay_2.png",
+    "C:\\Users\\LENOVO\\Desktop\\Rubicon\\docs\\samples\\sample_overlay_3.png",
+    "C:\\Users\\LENOVO\\Desktop\\Rubicon\\docs\\samples\\sample_overlay_4.png",
+    "C:\\Users\\LENOVO\\Desktop\\Rubicon\\docs\\samples\\sample_overlay_5.png"
+  ]
+}

@@ -1,15 +1,16 @@
 import { Router } from "express";
 import path from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import os from "node:os";
 import multer from "multer";
 import { requireAuth } from "../middleware/auth.js";
 import Assessment from "../models/Assessment.js";
 import { runInference } from "../services/aiService.js";
 import { transition } from "../services/assessmentService.js";
-import { pinBuffer } from "../services/ipfs.js";
-import { logAssessment } from "../services/chainService.js";
+import { attachProof } from "../services/proofService.js";
+import { persistFiles } from "../services/fileStorage.js";
+import { validateMagic, ALLOWED_EXTENSIONS } from "../services/fileValidation.js";
 import { config } from "../config.js";
 import { makeLogger } from "../middleware/logger.js";
 
@@ -17,7 +18,6 @@ const logger = makeLogger("upload");
 
 const router = Router();
 
-const ALLOWED_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".tiff", ".tif", ".las", ".laz"]);
 const MAX_BYTES = config.maxUploadMb * 1024 * 1024;
 
 function multerErrorToResponse(err, res) {
@@ -28,25 +28,6 @@ function multerErrorToResponse(err, res) {
     return res.status(400).json({ error: "only image files (.png/.jpg/.tif) or point clouds (.las/.laz) are supported" });
   }
   return res.status(400).json({ error: err?.message || "upload failed" });
-}
-
-function validateMagic(buf, kind) {
-  if (!buf || buf.length < 4) return "file payload too small or empty";
-  if (kind === "hsi") {
-    const little = buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00;
-    const big = buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a;
-    return little || big ? null : "hsi file is not a valid TIFF";
-  }
-  if (kind === "pre" || kind === "post") {
-    const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
-    const isJpg = buf[0] === 0xff && buf[1] === 0xd8;
-    const isTiffLittle = buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00;
-    const isTiffBig = buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a;
-    return isPng || isJpg || isTiffLittle || isTiffBig ? null : `${kind} image must be a valid PNG, JPEG, or TIFF`;
-  }
-  return buf.subarray(0, 4).toString("latin1") === "LASF"
-    ? null
-    : "lidar file is not a valid LAS/LAZ point cloud";
 }
 
 // Spool uploads to a per-request temp dir instead of holding 2×100 MB in RAM.
@@ -74,49 +55,6 @@ const upload = multer({
   { name: "hsi", maxCount: 1 },
   { name: "lidar", maxCount: 1 },
 ]);
-
-async function persistFiles(assessmentId, files) {
-  const dir = path.join(config.storageDir, assessmentId);
-  await mkdir(dir, { recursive: true });
-  const stored = {};
-  for (const [kind, { buffer, originalname }] of Object.entries(files)) {
-    const ext = path.extname(originalname).toLowerCase();
-    const rel = path.join(assessmentId, `${kind}${ext}`);
-    await writeFile(path.join(config.storageDir, rel), buffer);
-    stored[kind] = rel;
-  }
-  return stored;
-}
-
-// Phase 5 proof pipeline: content-address the uploads as real IPFS CIDv0 values
-// (pinning when Pinata is configured), then log the assessment on-chain (real
-// Amoy tx when the chain layer is configured, deterministic simulated tx
-// otherwise — the simulated path leaves state at "analyzed").
-async function attachProof(assessment, files, prediction) {
-  const primaryA = files.pre || files.hsi;
-  const primaryB = files.post || files.lidar;
-
-  const [pA, pB] = await Promise.all([
-    pinBuffer(primaryA.buffer, primaryA.originalname),
-    pinBuffer(primaryB.buffer, primaryB.originalname),
-  ]);
-
-  if (files.pre) {
-    assessment.preCid = pA.cid;
-    assessment.postCid = pB.cid;
-  }
-  assessment.hsiCid = pA.cid;
-  assessment.lidarCid = pB.cid;
-
-  const logged = await logAssessment({ hsiCid: pA.cid, lidarCid: pB.cid, prediction });
-  assessment.txHash = logged.txHash;
-  assessment.chainVerified = logged.chainVerified;
-  if (!logged.simulated) {
-    transition(assessment, "chain_pending");
-    transition(assessment, "chain_logged");
-  }
-  return assessment;
-}
 
 // POST /upload — accepts multipart fields (pre + post for xBD, or hsi + lidar for legacy),
 // runs the real Siamese U-Net engine, stores evidence, and pins/proves the upload.
