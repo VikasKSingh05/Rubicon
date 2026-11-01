@@ -18,6 +18,9 @@ On CUDA OOM the training loop clears the cache, reduces the crop
 (512 -> 384 -> 256), rebuilds the loaders, and retries the **current batch**
 without restarting the epoch. At 256 it raises instead of looping forever.
 
+Kaggle runs (full split, 16 GB) are documented in `docs/kaggle.md`; the
+notebook is `ai-engine/notebooks/kaggle_xbd_training.ipynb`.
+
 ## 2. Data
 
 - `XBD_ROOT` (or `--xbd-root`) points at `./data/xbd`.
