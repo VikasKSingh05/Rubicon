@@ -46,18 +46,26 @@ Quick outline from PowerShell:
 ```powershell
 Set-Location C:\Users\LENOVO\Desktop\Rubicon\ai-engine
 $XbdRoot = "D:\datasets\xbd" # contains train\ and hold\ directories
-python -m ai_engine.data.check --xbd-root $XbdRoot --samples 5 --crosscheck 5
+$RunOutput = "runs\xbd-demo-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$ModelOutput = "data\models\xbd-demo-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$LogOutput = "runs\xbd-training-$(Get-Date -Format yyyyMMdd-HHmmss)"
+python -m ai_engine.data.check --xbd-root $XbdRoot --samples 5 --crosscheck 5 `
+  --samples-dir "$RunOutput\overlays" --json-out "$RunOutput\data-check.json"
+python scripts\eda_xbd.py --xbd-root $XbdRoot --subset 0.3 `
+  --save-json "$RunOutput\eda.json"
 python train.py --xbd-root $XbdRoot --config auto --epochs 30 --subset 1.0 `
-  --output-dir data/models/xbd --log-dir runs/xbd-mentor-demo
-python eval.py --xbd-root $XbdRoot --checkpoint data/models/xbd/checkpoint_best.pt `
-  --split val --output-dir data/models/xbd/eval-val
+  --output-dir $ModelOutput --log-dir $LogOutput
+python eval.py --xbd-root $XbdRoot --checkpoint "$ModelOutput\checkpoint_best.pt" `
+  --split val --output-dir "$ModelOutput\eval-val"
 ```
 
 The primary score is event-disjoint validation from `train/`; `hold/` is
 evaluated separately as a supplemental tile-level check. These commands do not
 use synthetic data. A successful smoke test is not evidence of real-world
 accuracy, and no training-quality claims should be made until the full real-data
-run and evaluation have completed.
+run and evaluation have completed. EDA uses the saved event-disjoint split,
+training-only subset, and current four-class pixel weighting. Use a fresh
+`runs\...` output path for each report so earlier results are not overwritten.
 
 ## Quickstart
 

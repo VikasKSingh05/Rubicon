@@ -70,6 +70,7 @@ def generate_synthetic_dataset(
     tiles_per_event: int = 3,
     n_events: int | None = None,
     seed: int = 42,
+    num_pairs: int | None = None,
 ) -> Path:
     """Create a minimal xBD-like dataset on disk.
 
@@ -91,6 +92,8 @@ def generate_synthetic_dataset(
     tiles_per_event : how many image pairs per disaster event.
     n_events : how many events to include (default: all 6).
     seed : random seed for reproducibility.
+    num_pairs : optional exact total number of image pairs, distributed across
+        the selected events. Cannot be combined with ``n_events``.
 
     Returns
     -------
@@ -98,15 +101,29 @@ def generate_synthetic_dataset(
     """
     rng = np.random.default_rng(seed)
     output_dir = Path(output_dir)
-    events = _EVENTS if n_events is None else _EVENTS[:n_events]
+    if num_pairs is not None:
+        if num_pairs <= 0:
+            raise ValueError("num_pairs must be positive")
+        if n_events is not None:
+            raise ValueError("num_pairs cannot be combined with n_events")
+        event_count = min(num_pairs, len(_EVENTS))
+        events = _EVENTS[:event_count]
+        base_count, remainder = divmod(num_pairs, event_count)
+        pair_counts = [
+            base_count + (1 if event_index < remainder else 0)
+            for event_index in range(event_count)
+        ]
+    else:
+        events = _EVENTS if n_events is None else _EVENTS[:n_events]
+        pair_counts = [tiles_per_event] * len(events)
 
-    for event in events:
+    for event, event_pair_count in zip(events, pair_counts):
         img_dir = output_dir / "images" / event
         lbl_dir = output_dir / "labels" / event
         img_dir.mkdir(parents=True, exist_ok=True)
         lbl_dir.mkdir(parents=True, exist_ok=True)
 
-        for i in range(tiles_per_event):
+        for i in range(event_pair_count):
             tile_id = f"{event}_{i:04d}"
 
             # Random RGB satellite tiles

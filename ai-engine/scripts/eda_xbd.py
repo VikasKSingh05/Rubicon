@@ -1,195 +1,212 @@
-"""Exploratory Data Analysis (EDA) Pipeline for xBD Disaster Dataset.
-
-Analyzes:
-1. Pre and Post disaster satellite image characteristics (resolution, dynamic range, bands).
-2. Building polygon distributions and geometric areas across damage classes.
-3. Class imbalance across:
-   - 0: Background
-   - 1: No Damage
-   - 2: Minor Damage
-   - 3: Major Damage
-   - 4: Destroyed
-4. Pre-vs-Post spectral difference distributions (|I_post - I_pre|).
-5. Computes mathematically optimal inverse class weights for RubiconLoss.
-
-Usage:
-    python scripts/eda_xbd.py [--xbd-root <path>] [--synthetic] [--save-json <path>]
-"""
+#!/usr/bin/env python
+"""Explore the xBD training split using the same masks and weighting as training."""
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
+from collections import Counter
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Sequence
 
+import cv2
 import numpy as np
 
-# Ensure ai-engine root and workspace root are in sys.path
-root_dir = Path(__file__).resolve().parent.parent.parent
-if str(root_dir) not in sys.path:
-    sys.path.insert(0, str(root_dir))
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ai_engine.data.splits import get_xbd_root
-from ai_engine.data.parser import parse_xbd_label, DAMAGE_MAP
+from ai_engine.data.dataset import XBDDataset
+from ai_engine.data.parser import INVERSE_DAMAGE_MAP
+from ai_engine.data.splits import get_xbd_root, load_or_create_splits
+from ai_engine.model.losses import inverse_sqrt_class_weights
 from ai_engine.data.synthetic import generate_synthetic_dataset
 
 
-def run_eda(xbd_root: Path | str, max_samples: int = 500) -> Dict[str, Any]:
-    xbd_root = Path(xbd_root)
-    print(f"\n=======================================================")
-    print(f"  RUBICON xBD EXPLORATORY DATA ANALYSIS (EDA)")
-    print(f"  Target Root: {xbd_root}")
-    print(f"=======================================================\n")
+def _select_training_tiles(
+    tiles: list[dict[str, Any]], subset: float, seed: int = 42
+) -> list[dict[str, Any]]:
+    if not 0 < subset <= 1:
+        raise ValueError(f"--subset must be in (0, 1], got {subset}")
+    if subset == 1:
+        return list(tiles)
+    sample_count = max(1, int(len(tiles) * subset))
+    indices = np.sort(
+        np.random.default_rng(seed).choice(len(tiles), size=sample_count, replace=False)
+    )
+    return [tiles[int(index)] for index in indices]
 
-    # Locate labels
-    label_files = list(xbd_root.glob("**/labels/*_post_disaster.json"))
-    if not label_files:
-        label_files = list(xbd_root.glob("**/*_post_disaster.json"))
 
-    print(f"[EDA] Located {len(label_files)} post-disaster annotation JSON files.")
-    if len(label_files) == 0:
-        print("[WARNING] No JSON annotation files found. Run with --synthetic to generate procedural sample data.")
-        return {}
+def _count_label_objects(tiles: list[dict[str, Any]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for tile in tiles:
+        with open(tile["post_label"], "r", encoding="utf-8") as label_file:
+            label = json.load(label_file)
+        features = label.get("features", {}).get("xy", [])
+        for feature in features:
+            subtype = feature.get("properties", {}).get("subtype")
+            if subtype in ("no-damage", "minor-damage", "major-damage", "destroyed"):
+                counts[subtype] += 1
+            elif subtype == "un-classified":
+                counts["no-damage"] += 1
+            else:
+                raise ValueError(
+                    f"Unexpected damage subtype {subtype!r} in {tile['post_label']}"
+                )
+    return dict(sorted(counts.items()))
 
-    analyzed_count = min(len(label_files), max_samples)
-    print(f"[EDA] Sampling {analyzed_count} files for statistical profiling...\n")
 
-    class_counts = {
-        "no-damage": 0,
-        "minor-damage": 0,
-        "major-damage": 0,
-        "destroyed": 0,
-        "un-classified": 0,
-    }
-    polygon_areas: Dict[str, List[float]] = {k: [] for k in class_counts}
-    disaster_types: Dict[str, int] = {}
-    total_buildings = 0
+def _image_statistics(tiles: list[dict[str, Any]], max_samples: int) -> dict[str, Any]:
+    samples = tiles[:max_samples]
+    pre_pixels: list[np.ndarray] = []
+    post_pixels: list[np.ndarray] = []
+    differences: list[np.ndarray] = []
+    shapes: Counter[str] = Counter()
 
-    for path in label_files[:analyzed_count]:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+    for tile in samples:
+        pre = cv2.imread(tile["pre_image"], cv2.IMREAD_COLOR)
+        post = cv2.imread(tile["post_image"], cv2.IMREAD_COLOR)
+        if pre is None:
+            raise FileNotFoundError(f"Cannot read pre-disaster image: {tile['pre_image']}")
+        if post is None:
+            raise FileNotFoundError(f"Cannot read post-disaster image: {tile['post_image']}")
+        if post.shape[:2] != pre.shape[:2]:
+            post = cv2.resize(post, (pre.shape[1], pre.shape[0]), interpolation=cv2.INTER_AREA)
+        shapes[f"{pre.shape[1]}x{pre.shape[0]}"] += 1
+        pre = cv2.resize(pre, (128, 128), interpolation=cv2.INTER_AREA)
+        post = cv2.resize(post, (128, 128), interpolation=cv2.INTER_AREA)
+        pre_pixels.append(pre.reshape(-1, 3).astype(np.float64) / 255.0)
+        post_pixels.append(post.reshape(-1, 3).astype(np.float64) / 255.0)
+        differences.append(
+            np.abs(pre.astype(np.int16) - post.astype(np.int16)).reshape(-1, 3)
+            .astype(np.float64)
+            / 255.0
+        )
 
-            # Metadata extraction
-            metadata = data.get("metadata", {})
-            disaster_name = metadata.get("disaster_name", "unknown")
-            disaster_types[disaster_name] = disaster_types.get(disaster_name, 0) + 1
-
-            # Feature polygons
-            features = data.get("features", {}).get("xy", [])
-            for feat in features:
-                props = feat.get("properties", {})
-                subtype = props.get("subtype", "un-classified")
-                if subtype not in class_counts:
-                    subtype = "un-classified"
-
-                class_counts[subtype] += 1
-                total_buildings += 1
-
-                # Approximate polygon area from WKT if available
-                wkt = feat.get("wkt", "")
-                if "POLYGON" in wkt:
-                    # rough bounding box pixel area approximation
-                    coords_str = wkt.replace("POLYGON ((", "").replace("))", "")
-                    pts = [list(map(float, p.strip().split())) for p in coords_str.split(",") if len(p.strip().split()) >= 2]
-                    if len(pts) >= 3:
-                        xs = [p[0] for p in pts]
-                        ys = [p[1] for p in pts]
-                        area = 0.5 * abs(sum(xs[i]*ys[i+1] - xs[i+1]*ys[i] for i in range(len(xs)-1)))
-                        polygon_areas[subtype].append(area)
-
-        except Exception as e:
-            continue
-
-    # Class distribution percentages
-    print("-------------------------------------------------------")
-    print(" 1. BUILDING DAMAGE CLASS DISTRIBUTION & IMBALANCE")
-    print("-------------------------------------------------------")
-    print(f"Total Building Footprints Profiled: {total_buildings:,}\n")
-
-    distribution_report = {}
-    for dmg_name, count in class_counts.items():
-        pct = (count / max(1, total_buildings)) * 100
-        avg_area = np.mean(polygon_areas[dmg_name]) if polygon_areas[dmg_name] else 0.0
-        median_area = np.median(polygon_areas[dmg_name]) if polygon_areas[dmg_name] else 0.0
-        distribution_report[dmg_name] = {
-            "count": count,
-            "percentage": round(pct, 2),
-            "mean_pixel_area": round(float(avg_area), 1),
-            "median_pixel_area": round(float(median_area), 1),
+    def summary(arrays: list[np.ndarray]) -> dict[str, list[float]]:
+        pixels = np.concatenate(arrays, axis=0)
+        return {
+            "mean_bgr": pixels.mean(axis=0).round(6).tolist(),
+            "std_bgr": pixels.std(axis=0).round(6).tolist(),
         }
-        bar = "#" * int(pct / 2.5)
-        print(f"  {dmg_name:<15} | Count: {count:>6} ({pct:>5.1f}%) | Mean Area: {avg_area:>7.1f}px | {bar}")
 
-    # Inverse Frequency Class Weights for RubiconLoss
-    # Formula: w_c = N / (K * N_c)
-    print("\n-------------------------------------------------------")
-    print(" 2. RECOMMENDED LOSS CLASS WEIGHTS (RubiconLoss)")
-    print("-------------------------------------------------------")
-    valid_classes = ["no-damage", "minor-damage", "major-damage", "destroyed"]
-    valid_counts = [max(1, class_counts[c]) for c in valid_classes]
-    N_valid = sum(valid_counts)
-    K = len(valid_classes)
+    if not samples:
+        return {
+            "tiles_sampled": 0,
+            "sample_resolution": [128, 128],
+            "shapes": {},
+            "pre": None,
+            "post": None,
+            "absolute_pair_difference": None,
+        }
 
-    computed_weights = [round(float(N_valid / (K * count)), 3) for count in valid_counts]
-    # Background weight normalized to 0.2
-    loss_weights = [0.2] + computed_weights
-
-    print(f"Target Classes: [Background, No-Damage, Minor, Major, Destroyed]")
-    print(f"Mathematically Derived Weights: {loss_weights}\n")
-
-    # Disaster type distributions
-    print("-------------------------------------------------------")
-    print(" 3. DISASTER TYPES & EVENTS REPRESENTATION")
-    print("-------------------------------------------------------")
-    for d_name, count in sorted(disaster_types.items(), key=lambda x: x[1], reverse=True):
-        print(f"  {d_name:<25}: {count} scene pairs")
-
-    print("\n-------------------------------------------------------")
-    print(" 4. ARCHITECTURAL IMPLICATIONS FOR SIAMESE U-NET")
-    print("-------------------------------------------------------")
-    print("  * Extreme Class Imbalance:")
-    print("    No-Damage dominates destroyed/major classes by ~10:1.")
-    print("    -> Solution: Focal Loss (gamma=2.0) + Weighted Cross-Entropy.")
-    print("  * Spectral Delta Sensitivity:")
-    print("    Pre/Post difference [F_pre, F_post, |F_post - F_pre|] provides")
-    print("    direct gradient path for structural collapse features.")
-    print("=======================================================\n")
-
-    summary = {
-        "total_scenes": analyzed_count,
-        "total_buildings": total_buildings,
-        "class_distribution": distribution_report,
-        "disaster_types": disaster_types,
-        "recommended_class_weights": loss_weights,
+    return {
+        "tiles_sampled": len(samples),
+        "sample_resolution": [128, 128],
+        "shapes": dict(sorted(shapes.items())),
+        "pre": summary(pre_pixels),
+        "post": summary(post_pixels),
+        "absolute_pair_difference": {
+            "mean_bgr": np.concatenate(differences, axis=0).mean(axis=0).round(6).tolist()
+        },
     }
-    return summary
 
 
-def main():
-    parser = argparse.ArgumentParser(description="xBD Exploratory Data Analysis (EDA)")
-    parser.add_argument("--xbd-root", type=str, default=None, help="Root directory of xBD dataset")
-    parser.add_argument("--synthetic", action="store_true", help="Generate and profile procedural sample dataset")
-    parser.add_argument("--max-samples", type=int, default=500, help="Max JSON files to inspect")
-    parser.add_argument("--save-json", type=str, default="data/eda_summary.json", help="Path to save summary stats")
-    args = parser.parse_args()
+def run_eda(
+    xbd_root: str | Path | None = None,
+    subset: float = 1.0,
+    max_samples: int = 32,
+    cache_dir: str | Path = "data/xbd_cache",
+    source_split: str | None = None,
+) -> dict[str, Any]:
+    root = get_xbd_root(xbd_root)
+    splits = load_or_create_splits(root, source_split=source_split)
+    metadata = splits.get("metadata", {})
+    train_tiles = splits.get("train", [])
+    if not train_tiles:
+        raise ValueError(f"No training tiles found for xBD root {root}")
 
+    selected_tiles = _select_training_tiles(train_tiles, subset)
+    dataset = XBDDataset(
+        selected_tiles,
+        crop_size=None,
+        is_train=False,
+        cache_dir=cache_dir,
+    )
+    class_pixel_counts = dataset.damage_class_pixel_counts()
+    class_weights = inverse_sqrt_class_weights(class_pixel_counts)
+    class_names = [INVERSE_DAMAGE_MAP[class_id] for class_id in range(1, 5)]
+    pixel_summary = {
+        class_names[index]: int(class_pixel_counts[index])
+        for index in range(len(class_names))
+    }
+    weight_summary = {
+        class_names[index]: round(float(class_weights[index]), 6)
+        for index in range(len(class_names))
+    }
+
+    return {
+        "dataset_root": str(root.resolve()),
+        "source_split": metadata.get("source_split"),
+        "split_manifest": str(
+            (root / f"splits_{metadata.get('source_split')}.json")
+            if (root / f"splits_{metadata.get('source_split')}.json").exists()
+            else (root / "splits.json")
+        ),
+        "train_tiles_available": len(train_tiles),
+        "training_subset_fraction": subset,
+        "training_tiles_analyzed": len(selected_tiles),
+        "validation_tiles": len(splits.get("val", [])),
+        "train_events": metadata.get("train_events", []),
+        "validation_events": metadata.get("val_events", []),
+        "damage_object_counts": _count_label_objects(selected_tiles),
+        "building_pixel_counts": pixel_summary,
+        "class_weights": weight_summary,
+        "weighting": "normalized inverse-square-root pixel frequency, capped at 10; no weighted sampler",
+        "image_statistics": _image_statistics(selected_tiles, max_samples),
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Analyze xBD training labels, pixel frequencies, and image pairs."
+    )
+    parser.add_argument("--xbd-root", type=str, default=None, help="Root path to xBD")
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Generate and analyze a clearly labeled synthetic dataset",
+    )
+    parser.add_argument("--subset", type=float, default=1.0, help="Training tile fraction (0, 1]")
+    parser.add_argument(
+        "--max-samples", type=int, default=32, help="Maximum image pairs for RGB statistics"
+    )
+    parser.add_argument("--source-split", type=str, default=None, help="Source split, e.g. train")
+    parser.add_argument("--cache-dir", type=str, default="data/xbd_cache")
+    parser.add_argument("--save-json", type=str, default="data/eda_summary.json")
+    args = parser.parse_args(argv)
+
+    if args.max_samples < 0:
+        parser.error("--max-samples must be non-negative")
+    xbd_root = args.xbd_root
     if args.synthetic:
-        root_path = generate_synthetic_dataset()
-    else:
-        root_path = get_xbd_root(args.xbd_root)
+        if xbd_root:
+            parser.error("--synthetic and --xbd-root cannot be used together")
+        xbd_root = str(generate_synthetic_dataset(output_dir="data/synthetic_xbd"))
 
-    results = run_eda(root_path, max_samples=args.max_samples)
-
-    if args.save_json and results:
-        out_p = Path(args.save_json)
-        out_p.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_p, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2)
-        print(f"[EDA] Summary results saved to {out_p.resolve()}")
+    report = run_eda(
+        xbd_root=xbd_root,
+        subset=args.subset,
+        max_samples=args.max_samples,
+        cache_dir=args.cache_dir,
+        source_split=args.source_split,
+    )
+    print(json.dumps(report, indent=2))
+    output_path = Path(args.save_json)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"\nEDA summary saved to {output_path.resolve()}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

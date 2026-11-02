@@ -54,7 +54,7 @@ ai-engine/
 │   │   ├── sat_serving.py    # Satellite inference runner
 │   │   └── hardware.py       # Hardware auto-detection (MPS/CUDA/CPU/RAM)
 │   ├── training/
-│   │   └── train.py          # Training loop with AMP, checkpointing & logging
+│   │   └── train.py          # Compatibility entry point for the root v3 trainer
 │   └── serve.py              # FastAPI app: POST /infer/satellite and /infer/drone
 ├── scripts/
 │   ├── download_xbd.py       # xBD dataset access guide & synthetic generator
@@ -76,12 +76,18 @@ The dataset root must contain `train\images`, `train\labels`, and optionally
 
 ```powershell
 $XbdRoot = "D:\datasets\xbd"
+$RunOutput = "runs\xbd-demo-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$ModelOutput = "data\models\xbd-demo-$(Get-Date -Format yyyyMMdd-HHmmss)"
+$LogOutput = "runs\xbd-training-$(Get-Date -Format yyyyMMdd-HHmmss)"
 python -m pip install -r requirements.txt
-python -m ai_engine.data.check --xbd-root $XbdRoot --samples 5 --crosscheck 5
+python -m ai_engine.data.check --xbd-root $XbdRoot --samples 5 --crosscheck 5 `
+  --samples-dir "$RunOutput\overlays" --json-out "$RunOutput\data-check.json"
+python scripts\eda_xbd.py --xbd-root $XbdRoot --subset 0.3 `
+  --save-json "$RunOutput\eda.json"
 python train.py --xbd-root $XbdRoot --config auto --epochs 30 --subset 1.0 `
-  --output-dir data/models/xbd --log-dir runs/xbd-mentor-demo
-python eval.py --xbd-root $XbdRoot --checkpoint data/models/xbd/checkpoint_best.pt `
-  --split val --output-dir data/models/xbd/eval-val
+  --output-dir $ModelOutput --log-dir $LogOutput
+python eval.py --xbd-root $XbdRoot --checkpoint "$ModelOutput\checkpoint_best.pt" `
+  --split val --output-dir "$ModelOutput\eval-val"
 ```
 
 The primary reported score is from the event-disjoint validation subset of
@@ -91,14 +97,18 @@ results, and loading the trained model in Rubicon. Missing data paths stop the
 run instead of silently substituting synthetic data.
 
 ### 1. Generate Synthetic Data
-```bash
-python scripts/download_xbd.py --synthetic --num-pairs 10
+```powershell
+$SyntheticOutput = "runs\synthetic-xbd-$(Get-Date -Format yyyyMMdd-HHmmss)"
+python scripts\download_xbd.py --synthetic --num-pairs 10 --dest $SyntheticOutput
 ```
 
 ### 2. Run Exploratory Data Analysis (EDA)
-```bash
+```powershell
 # Terminal summary
-python scripts/eda_xbd.py --synthetic
+$XbdRoot = "D:\datasets\xbd"
+$RunOutput = "runs\xbd-eda-$(Get-Date -Format yyyyMMdd-HHmmss)"
+python scripts\eda_xbd.py --xbd-root $XbdRoot --subset 0.3 `
+  --save-json "$RunOutput\eda.json"
 
 # Or launch Jupyter notebook
 jupyter lab notebooks/eda.ipynb

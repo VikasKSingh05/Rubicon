@@ -24,6 +24,9 @@ import argparse
 import sys
 from pathlib import Path
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 def print_info():
     print("=" * 70)
@@ -43,7 +46,7 @@ def print_info():
     print("     https://huggingface.co/datasets/dioptra-ai/xbd")
     print()
     print("Local Target Directory:")
-    print("  ai-engine/data/xbd/")
+    print("  data/xbd/ (or a path supplied with --xbd-root / XBD_ROOT)")
     print()
     print("Quick Start (No download needed - Synthetic Data):")
     print("  python scripts/download_xbd.py --synthetic --num-pairs 10")
@@ -61,8 +64,10 @@ def main():
     if args.synthetic:
         from ai_engine.data.synthetic import generate_synthetic_dataset
         dest = Path(args.dest)
-        print(f"Generating {args.num_pairs} synthetic xBD image pairs in '{dest}'...")
-        generate_synthetic_dataset(output_dir=str(dest), num_pairs=args.num_pairs)
+        if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
+            parser.error(f"Destination is not empty; choose a fresh path: {dest}")
+        print(f"Generating exactly {args.num_pairs} synthetic xBD image pairs in '{dest}'...")
+        generate_synthetic_dataset(output_dir=dest, num_pairs=args.num_pairs)
         print(f"Synthetic xBD dataset generated successfully at '{dest}'")
         return 0
 

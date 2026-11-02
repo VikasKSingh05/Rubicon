@@ -11,7 +11,7 @@ Prints:
     - mask agreement against xBD ``targets/`` PNGs
     - class-frequency histogram
 Saves:
-    - qualitative sample overlays under ``docs/samples/``
+    - qualitative overlays under a timestamped ``runs/data-check/`` directory
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ import os
 import random
 import sys
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -55,7 +56,7 @@ def default_cache_dir() -> Path:
     env = os.environ.get("XBD_CACHE_DIR")
     if env:
         return Path(env).expanduser().resolve()
-    return repo_root() / "data" / "xbd_cache"
+    return Path(__file__).resolve().parents[2] / "data" / "xbd_cache"
 
 
 def event_counts(tiles: Sequence[Dict[str, Any]]) -> Dict[str, int]:
@@ -231,6 +232,10 @@ def _save_overlays(
     num_samples: int,
 ) -> List[Path]:
     samples_dir.mkdir(parents=True, exist_ok=True)
+    if num_samples < 0:
+        raise ValueError("num_samples must be non-negative")
+    if num_samples == 0:
+        return []
     selected: List[Tuple[Dict[str, Any], np.ndarray, np.ndarray]] = []
 
     for tile in tiles:
@@ -282,11 +287,16 @@ def run_data_check(
     samples_dir: Optional[str | Path] = None,
     crosscheck_n: int = 10,
     source_split: Optional[str] = None,
+    rebuild_splits: bool = False,
 ) -> Dict[str, Any]:
     root_dir = repo_root()
     cache_dir = default_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    out_samples = Path(samples_dir) if samples_dir else root_dir / "docs" / "samples"
+    out_samples = (
+        Path(samples_dir)
+        if samples_dir
+        else root_dir / "runs" / "data-check" / datetime.now().strftime("%Y%m%d-%H%M%S")
+    )
 
     print("=" * 78)
     print("RUBICON PHASE 2 - xBD DATA PIPELINE CHECK")
@@ -318,11 +328,16 @@ def run_data_check(
     splits = load_or_create_splits(
         xbd_root=xbd_root,
         source_split=source_name,
-        force_recreate=True,
+        force_recreate=rebuild_splits,
     )
     meta = splits.get("metadata", {})
     train_tiles = splits.get("train", [])
     val_tiles = splits.get("val", [])
+    if not train_tiles or not val_tiles:
+        raise RuntimeError(
+            f"Cannot validate event-disjoint splits for {source_root}: "
+            f"{len(train_tiles)} training and {len(val_tiles)} validation tiles."
+        )
 
     print(f"\n--- 2. Event-disjoint split (source: {source_name}) ---")
     print(f"Source root:        {source_root}")
@@ -421,6 +436,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--crosscheck", type=int, default=10, help="Tiles to compare against targets/")
     parser.add_argument("--source-split", type=str, default=None, help="train | hold | test")
     parser.add_argument("--json-out", type=str, default=None, help="Optional path to write the stats JSON")
+    parser.add_argument(
+        "--samples-dir",
+        type=str,
+        default=None,
+        help="Overlay output directory (defaults to a timestamped directory under runs/data-check)",
+    )
+    parser.add_argument(
+        "--rebuild-splits",
+        action="store_true",
+        help="Explicitly regenerate the event split manifest instead of reusing it",
+    )
     args = parser.parse_args(argv)
 
     stats = run_data_check(
@@ -429,6 +455,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         num_samples=args.samples,
         crosscheck_n=args.crosscheck,
         source_split=args.source_split,
+        samples_dir=args.samples_dir,
+        rebuild_splits=args.rebuild_splits,
     )
     if args.json_out:
         Path(args.json_out).parent.mkdir(parents=True, exist_ok=True)

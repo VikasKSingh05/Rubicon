@@ -25,6 +25,7 @@ from ai_engine.data.splits import (
     resolve_source_root,
     validate_splits,
 )
+from ai_engine.data.check import run_data_check
 from ai_engine.data.synthetic import generate_synthetic_dataset
 from ai_engine.data.dataset import XBDDataset, compute_norm_stats, get_weighted_sampler
 
@@ -45,6 +46,14 @@ def test_damage_mapping_contract():
     assert DAMAGE_MAP["destroyed"] == 4
     # Requirement: Treat "un-classified" as no-damage (1)
     assert DAMAGE_MAP["un-classified"] == 1
+
+
+def test_synthetic_generator_honors_exact_pair_count(tmp_path):
+    dataset_path = generate_synthetic_dataset(
+        output_dir=tmp_path / "synthetic_exact",
+        num_pairs=10,
+    )
+    assert len(discover_xbd_tiles(dataset_path)) == 10
 
 
 def test_mask_shapes_and_values(sample_dataset):
@@ -108,6 +117,26 @@ def test_no_event_overlap_between_splits(sample_dataset, tmp_path):
     assert len(overlap) == 0, f"Disaster events overlap between splits: {overlap}"
     assert len(train_events) >= 1
     assert len(val_events) >= 1
+
+
+def test_data_check_reuses_split_and_writes_overlays_to_requested_directory(
+    sample_dataset, tmp_path
+):
+    split_file = sample_dataset / "splits.json"
+    load_or_create_splits(sample_dataset)
+    original_manifest = split_file.read_bytes()
+    overlay_dir = tmp_path / "overlays"
+
+    stats = run_data_check(
+        xbd_root_arg=str(sample_dataset),
+        num_samples=0,
+        samples_dir=overlay_dir,
+        crosscheck_n=0,
+    )
+
+    assert split_file.read_bytes() == original_manifest
+    assert stats["overlays"] == []
+    assert overlay_dir.is_dir()
 
 
 def test_dataset_item_contract_and_oom_recovery(sample_dataset, tmp_path):

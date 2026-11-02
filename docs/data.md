@@ -105,6 +105,9 @@ To prevent spatial autocorrelation and test real generalization, tiles are **nev
 
 ## 5. Mask Parity with Shipped Targets
 
+See the recorded real-data run, class counts, weights, agreement scores, and
+local artifact paths in [xbd-preprocessing-report.md](xbd-preprocessing-report.md).
+
 `targets/` PNGs are compared against masks rasterized from the JSON labels by `python -m ai_engine.data.check`. Coordinates are **rounded** (not truncated) to the nearest pixel, which matches the xBD rasterizer.
 
 | Check | Tiles | Localization agreement | Damage agreement |
@@ -116,14 +119,29 @@ Per-class IoU on the 12-tile check: `background=0.9994`, `no-damage=0.9795`, `mi
 
 Class frequencies (200 tiles): background 77.51% of all pixels; among building pixels: `no-damage` 95.52%, `minor-damage` 0.37%, `major-damage` 0.94%, `destroyed` 3.18%. Damage loss uses training-pixel-frequency-derived class weights on ground-truth building pixels; training does not use weighted oversampling.
 
-Regenerate all of the above plus qualitative overlays:
+Run the real-data EDA on the same deterministic 30% training subset used for
+the v3 run, followed by the data checks and overlays. Start a fresh output
+directory so previous results are preserved:
 
-```bash
-$env:XBD_ROOT="./data/xbd"          # PowerShell
-python -m ai_engine.data.check --xbd-root ./data/xbd --crosscheck 12 --samples 5
+```powershell
+Set-Location C:\Users\LENOVO\Desktop\Rubicon\ai-engine
+$XbdRoot = "D:\datasets\xbd"
+$RunOutput = "runs\xbd-pipeline-$(Get-Date -Format yyyyMMdd-HHmmss)"
+python scripts\eda_xbd.py --xbd-root $XbdRoot --subset 0.3 `
+  --save-json "$RunOutput\eda.json"
+python -m ai_engine.data.check --xbd-root $XbdRoot --crosscheck 12 --samples 5 `
+  --samples-dir "$RunOutput\overlays" --json-out "$RunOutput\data-check.json"
 ```
 
-Overlays are written to `docs/samples/` (gitignored; regenerate on demand rather than committing ~10 MB of PNGs).
+EDA uses the saved event-disjoint manifest, the same seed-42 30% subset as
+training, full-tile rasterized masks, and the trainer's normalized
+inverse-square-root weights over the four building classes. It reports object
+counts, pixel counts, sampled RGB pair statistics, and class weights; it does
+not include `hold/` in those training statistics. The data checker reuses the
+split manifest by default and writes overlays to the specified run directory.
+Use `--rebuild-splits` only when intentionally regenerating the manifest.
+Generated JSON, caches, and overlays are local run outputs and are not
+committed.
 
 ---
 
