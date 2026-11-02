@@ -9,7 +9,7 @@ building-localization and damage-classification heads. Assessments flow through
 the backend to the map dashboard, with optional IPFS pinning and Polygon Amoy
 proofs, and a tool-grounded AI assistant.
 
-> ⚠️ **Project status: Phase 7** — hardened vertical slice is live end-to-end
+> ⚠️ **Project status:** — hardened vertical slice is live end-to-end
 > (register/login, upload, map, detail view, AI assistant, original-file
 > downloads, chain re-verification, password change). Sessions use short-lived
 > access tokens (browser memory only) + rotating httpOnly refresh cookies;
@@ -100,16 +100,3 @@ mirrored as JSON under [`contracts/`](contracts/). Build against these exactly.
 # Python service
 (cd ai-engine && pip install -r requirements.txt && python -m pytest)
 ```
-
-## Roadmap
-
-| Phase | Focus |
-| ----- | ----- |
-| 0 | Environment, repo, contracts-first setup |
-| 1 | Stub vertical slice (upload → fake AI → map) + auth |
-| 2 | Real data exploration + preprocessing pipeline |
-| 3 | xBD optical satellite model (Siamese U-Net) |
-| 4 | Agentic AI layer (tool-grounded chat) |
-| 5 | IPFS + blockchain layer (Amoy) |
-| 6          | Integration, testing, polish, report |
-| 7          | Hardening: session security, rate limiting, artifact persistence, ops docs |
