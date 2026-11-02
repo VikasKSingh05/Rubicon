@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import { api } from "../lib/api.js";
+import Modal from "./Modal.jsx";
 
 const STEPS = [
   { key: "uploading", label: "Uploading" },
@@ -182,11 +183,17 @@ export default function UploadModal({ onClose, onCreated }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+    <Modal
+      onClose={close}
+      labelledBy="xbd-upload-title"
+      panelClassName="max-w-md rounded-xl bg-white p-6 shadow-2xl"
+      closeDisabled={phase === "in-progress"}
+    >
         <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
-            <h2 className="text-lg font-bold text-primary">xBD Satellite Assessment</h2>
+            <h2 id="xbd-upload-title" className="text-lg font-bold text-primary">
+              xBD Satellite Assessment
+            </h2>
             <p className="text-xs text-slate-500">Siamese U-Net Pre & Post Disaster Pipeline</p>
           </div>
           <button
@@ -228,7 +235,6 @@ export default function UploadModal({ onClose, onCreated }) {
             </button>
           </form>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import { api } from "../lib/api.js";
+import Modal from "./Modal.jsx";
 
 const ACCEPT_DRONE = [".png", ".jpg", ".jpeg", ".tif", ".tiff"];
 
@@ -58,19 +59,19 @@ export default function DroneInspectorModal({ isOpen, onClose, parentCellId, ass
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !analyzing) onClose();
-      }}
+    <Modal
+      onClose={onClose}
+      labelledBy="drone-triage-title"
+      closeOnBackdrop
+      closeDisabled={analyzing}
+      panelClassName="max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-2xl"
     >
-      <div className="relative w-full max-w-xl rounded-xl border border-slate-200 bg-white p-6 shadow-2xl transition-all">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
-            <h2 className="text-lg font-bold text-slate-800">Stage 2: Drone Triage Inspector</h2>
+            <h2 id="drone-triage-title" className="text-lg font-bold text-slate-800">
+              Stage 2: Drone Triage Inspector
+            </h2>
             <p className="text-xs text-slate-500">
               High-resolution structural failure analysis & failure mode breakdown
             </p>
@@ -250,7 +251,6 @@ export default function DroneInspectorModal({ isOpen, onClose, parentCellId, ass
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }
