@@ -47,7 +47,7 @@ class TestSiameseUNetTrainingLoop:
 
         # Checkpoint produced
         assert (tmp_path / "models" / "siamese_unet.pt").exists()
-        assert (tmp_path / "models" / "siamese_metrics.json").exists()
+        assert (tmp_path / "models" / "training_metrics.json").exists()
 
         # Result structure
         assert "model_version" in result
@@ -82,7 +82,7 @@ class TestSiameseUNetTrainingLoop:
         assert "model_version" in cp
         assert "encoder_name" in cp
         assert "num_classes" in cp
-        assert cp["num_classes"] == 5
+        assert cp["num_classes"] == 4
         assert "state_dict" in cp
 
 

@@ -48,7 +48,7 @@ def get_checkpoint_sha256(path: Path | str) -> str:
     return h.hexdigest()[:16]
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Train Rubicon Siamese U-Net Disaster Assessment Model")
     parser.add_argument("--epochs", type=int, default=10, help="Total training epochs")
     parser.add_argument("--config", type=str, default="auto", help="Hardware profile: auto, local_6gb, kaggle, cpu")
@@ -56,6 +56,12 @@ def parse_args():
     parser.add_argument("--max-val", type=int, default=None, help="Cap validation tiles (for smoke tests)")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
     parser.add_argument("--synthetic", action="store_true", help="Train on synthetic procedural dataset")
+    parser.add_argument(
+        "--synthetic-dir",
+        type=str,
+        default=None,
+        help="Directory for generated synthetic data (requires --synthetic)",
+    )
     parser.add_argument("--xbd-root", type=str, default=None, help="Root path to xBD dataset")
     parser.add_argument("--cache-dir", type=str, default="data/xbd_cache", help="Directory for cached rasterized masks")
     parser.add_argument("--no-pretrained", action="store_true", help="Do not download ImageNet encoder weights")
@@ -63,21 +69,31 @@ def parse_args():
     parser.add_argument("--log-dir", type=str, default="runs/rubicon_training", help="TensorBoard log directory")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--patience", type=int, default=6, help="Early stopping patience epochs")
-    return parser.parse_args()
+    parser.add_argument(
+        "--model-version",
+        type=str,
+        default=None,
+        help="Override the model version recorded in checkpoints",
+    )
+    args = parser.parse_args(argv)
+    if args.synthetic_dir and not args.synthetic:
+        parser.error("--synthetic-dir requires --synthetic")
+    return args
 
 
-def train():
-    args = parse_args()
+def train(argv=None):
+    args = parse_args(argv)
     run_started = time.perf_counter()
 
     # 1. Hardware auto-detection (respects --config)
     profile = detect_hardware(args.config)
     device = torch.device(profile.device)
+    model_version = args.model_version or f"siamese_unet_{profile.encoder}_damage4_v2"
 
     # 2. Dataset resolution and splitting
     if args.synthetic:
         print("[INFO] --synthetic flag active. Generating procedural dataset...")
-        xbd_root = generate_synthetic_dataset()
+        xbd_root = generate_synthetic_dataset(output_dir=args.synthetic_dir or "data/synthetic_xbd")
     else:
         xbd_root = get_xbd_root(args.xbd_root)
     data_mode = "synthetic" if args.synthetic else "real_xbd"
@@ -477,7 +493,6 @@ def train():
             )
 
         # 8. Checkpoint Saving (Every Epoch: last and best)
-        model_version = f"siamese_unet_{profile.encoder}_damage4_v2"
         metrics_payload = dict(metrics)
         metrics_payload["xview2_score"] = xview2_score
 
@@ -568,7 +583,7 @@ def train():
         "data_mode": data_mode,
         "xbd_root": str(Path(xbd_root).resolve()),
         "source_split": split_meta.get("source_split"),
-        "model_version": f"siamese_unet_{profile.encoder}_damage4_v2",
+        "model_version": model_version,
         "encoder": profile.encoder,
         "num_classes": 4,
         "class_names": DAMAGE_SEVERITY_CLASS_NAMES,
@@ -641,6 +656,7 @@ def train():
         print(f"  Estimated Full Run (30 ep):  {full_run_30_est} minutes")
     print(f"  Checkpoints saved in:        {out_dir.resolve()}")
     print("=" * 65 + "\n")
+    return training_summary
 
 
 if __name__ == "__main__":
