@@ -53,7 +53,7 @@ flowchart TD
         Backend -->|Spool Multipart Files| LocalStorage["Local Disk Storage (/storage)"]
         
         Backend -->|POST /infer/satellite (pre + post)| AIEngineSat["xBD Satellite Engine (FastAPI :8002)"]
-        Backend -.->|Legacy HSI/LiDAR POST /predict| AIEngine["Legacy Engine (FastAPI :8000)"]
+        Backend -->|POST /infer/drone| AIEngineSat
         
         Backend -->|Compute CIDv0 & Pin Buffer| IPFS["IPFS / Pinata Gateway"]
         Backend -->|logAssessment(tx)| Polygon["Polygon Amoy Testnet (Chain ID 80002)"]
@@ -62,7 +62,7 @@ flowchart TD
         Agent -->|LLM Function Calling| LLM["Anthropic Claude / OpenAI / OpenRouter"]
     end
     
-    AIEngine -.->|If Offline| Stub["Deterministic AI Fallback (stubPredict)"]
+    Backend -.->|If unavailable| Stub["Versioned xBD stub result"]
     Polygon -.->|If No Gas/Key| SimChain["Deterministic Chain Simulation"]
     LLM -.->|If No API Key| FallbackAgent["Deterministic Heuristic Agent"]
 ```
@@ -81,8 +81,8 @@ flowchart TD
 ## 3. The Complete File-by-File Blueprint
 
 ### 3.1 Root Configuration & Scripts
-* **[`package.json`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/package.json)**: Top-level manifest defining end-to-end smoke harness scripts (`e2e` and `e2e:setup`).
-* **[`docker-compose.yml`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/docker-compose.yml)**: Multi-container orchestration definition for 5 services: `mongodb` (7.0.14), `ai-engine`, `ai-engine-satellite`, `agent-service`, `backend`, and `frontend`, with internal Docker DNS networking and health check dependencies.
+* **[`package.json`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/package.json)**: Top-level manifest defining the end-to-end smoke harness (`e2e`).
+* **[`docker-compose.yml`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/docker-compose.yml)**: Multi-container orchestration for five services: `mongodb`, `ai-engine`, `agent-service`, `backend`, and `frontend`, with internal Docker DNS networking and health-check dependencies.
 * **[`.env.example`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/.env.example) / [`.env`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/.env)**: Centralized environment template with configurations for MongoDB connection URI, JWT secrets, Pinata JWT, Polygon RPC URL, contract addresses, and LLM provider credentials.
 * **[`train.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/train.py)**: Standalone Python training pipeline for the Dual-Task Siamese U-Net model on the xBD dataset (featuring auto-hardware profiling, AMP fp16, Cosine schedule, and automatic CUDA OOM crop-size halving).
 * **[`eval.py`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/eval.py)**: Model evaluation script calculating xView2 building localization $F_1$, damage classification $F_1$, and harmonic mean score.
@@ -103,7 +103,7 @@ flowchart TD
   - **[`upload.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/upload.js)**: Multi-part disk spooling via Multer, magic-byte validation, AI inference coordination, IPFS CID hashing, on-chain logging, and file persistence.
   - **[`assessments.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/assessments.js)**: Pagination, filtering by severity, single assessment detail retrieval, H3 hexagonal cell extraction (`/cells`), and on-chain verification trigger (`/verify`).
   - **[`chain.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/chain.js)**: Exposes `/chain/status` to report current Polygon Amoy connectivity, contract address, and latest block.
-  - **`backend/src/routes/files.js`**: Secure, owner-scoped streaming endpoint for persisted upload originals. HSI/LiDAR file types are retained for the legacy scan contract; xBD assessments use pre/post optical images.
+  - **`backend/src/routes/files.js`**: Secure, owner-scoped streaming endpoint for persisted upload originals. New assessments use pre/post optical images; legacy aliases are read-only compatibility for historical records.
   - **[`satellite.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/satellite.js)**: Accepts pre-disaster and post-disaster optical/satellite image pairs for building change detection and damage assessment.
   - **[`drone.js`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/backend/src/routes/drone.js)**: High-resolution drone imagery triage endpoint linking targeted drone inspections to specific H3 hexagon cells.
 * **Models (`backend/src/models/`)**:
@@ -157,10 +157,9 @@ flowchart TD
 ---
 
 ### 3.5 Deep Learning AI Engine (`ai-engine/`)
-* **Primary xBD model**: `ai-engine/ai_engine/model/siamese_unet.py` defines the shared ResNet encoder, multi-scale temporal feature fusion, U-Net decoder, and localization/damage heads. `ai-engine/ai_engine/training/train.py` provides training; the repository-root `train.py` CLI writes best, last, and serving checkpoints plus `training_metrics.json`.
+* **Primary xBD model**: `ai-engine/ai_engine/model/siamese_unet.py` defines the shared ResNet encoder, multi-scale temporal feature fusion, U-Net decoder, and localization/damage heads. `ai-engine/ai_engine/training/train.py` provides training; the `ai-engine/train.py` CLI writes best, last, and serving checkpoints plus `training_metrics.json`.
 * **xBD data and evaluation**: `ai-engine/ai_engine/data/` discovers labeled pre/post image pairs, rasterizes xBD polygon labels, and creates disaster-event-disjoint train/validation splits. The repository-root `eval.py` evaluates `val`, `hold`, or `test` and writes metrics, a confusion matrix, and prediction overlays. `hold/` is a supplemental tile-level split, not an unseen-event test.
-* **Satellite inference**: `ai-engine/ai_engine/serve.py` serves `POST /infer/satellite` on port 8002. It loads `siamese_unet.pt` from `RUBICON_MODEL_DIR` (default `ai-engine/data/models/xbd`) and returns building/cell GeoJSON. `Dockerfile.satellite` packages this service. If no checkpoint exists, the endpoint responds with a clearly versioned stub; it is not model inference.
-* **Separate legacy experiment**: `ai-engine/src/` contains the Houston 2013 HSI/LiDAR preprocessing and Mamba/Transformer model exposed through the legacy `/predict` service on port 8000. It is not the xBD Siamese U-Net and its model/checkpoint/metrics must not be used to claim xBD training results.
+* **Inference service**: `ai-engine/ai_engine/serve.py` serves `POST /infer/satellite` and `POST /infer/drone` on port 8002. The satellite endpoint loads a checkpoint from `RUBICON_MODEL_DIR` (default `ai-engine/data/models/xbd`). If no checkpoint exists, it returns a clearly versioned stub; that response is not trained-model inference.
 
 ---
 
@@ -168,17 +167,17 @@ flowchart TD
 * **[`contracts/contracts/PramaanLedger.sol`](file:///c:/Users/Lenovo/Documents/Projects/Rubicon/Rubicon/contracts/contracts/PramaanLedger.sol)**: Solidity 0.8.24 smart contract deployed to Polygon Amoy. Records an array of `LogEntry` structures:
   ```solidity
   struct LogEntry {
-      string hsiCid;
-      string lidarCid;
+      string hsiCid;   // historical ABI name; stores the pre-image CID
+      string lidarCid; // historical ABI name; stores the post-image CID
       string prediction;
       uint256 timestamp;
       address logger;
   }
   ```
-  Emits an indexed event `AssessmentLogged(id, hsiCid, prediction, timestamp)`.
+  Emits an indexed event `AssessmentLogged(id, hsiCid, prediction, timestamp)`. The deployed ABI retains the original field names for compatibility.
 * **JSON API Contracts**:
   - `assessment.schema.json`: Formal JSON Schema defining the assessment document structure.
-  - `predict.response.json`: AI Engine `/predict` contract definition.
+  - `upload.response.json`: xBD paired-image upload response contract.
   - `agent-query.response.json`: Agent Service `/agent/query` schema.
   - `satellite.response.json` & `drone.response.json`: Satellite and drone triage payload schemas.
 
@@ -189,8 +188,7 @@ flowchart TD
 ### 4.1 Primary Dataset: xBD (xView2)
 
 The xBD pipeline uses paired pre-disaster and post-disaster optical RGB satellite
-tiles with polygon labels. HSI/LiDAR refers to a separate legacy experiment,
-not an input to this Siamese U-Net.
+tiles with polygon labels.
 
 | Property | xBD implementation |
 |---|---|
@@ -198,10 +196,11 @@ not an input to this Siamese U-Net.
 | **Network input** | Three-channel pre and post tensors; crop size selected by hardware profile |
 | **Encoder** | Shared ResNet-18 (CPU profile) or ResNet-34 (GPU profiles) |
 | **Outputs** | Binary building-localization mask and four-way damage logits trained on building pixels |
-| **Damage channels** | `0: background`, `1: no-damage`, `2: minor-damage`, `3: major-damage`, `4: destroyed` |
+| **Damage head** | Four logits: no-damage, minor-damage, major-damage, destroyed; trained on ground-truth building pixels only |
+| **Mask labels** | `0: background`, `1: no-damage`, `2: minor-damage`, `3: major-damage`, `4: destroyed` |
 | **Training entry point** | `python train.py --xbd-root <path>` from `ai-engine/` |
 | **Evaluation entry point** | `python eval.py --xbd-root <path> --split val` from `ai-engine/` |
-| **Inference endpoint** | `POST /infer/satellite` on the satellite engine (`:8002`) |
+| **Inference endpoint** | `POST /infer/satellite` on the shared AI engine (`:8002`) |
 
 ---
 
@@ -429,7 +428,6 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 | Layer | Primary Technology | Degradation Trigger | Fallback Behavior |
 |---|---|---|---|
 | **Satellite Inference (xBD)** | Siamese U-Net (`:8002`) | Checkpoint absent | Returns a versioned empty stub response; this is not trained-model inference. |
-| **Legacy Inference** | HSI/LiDAR Mamba-Transformer (`:8000`) | Legacy service/model unavailable | Uses the separate contract-compatible `stubPredict()` fallback; these results are not xBD predictions. |
 | **IPFS Pinning** | Pinata IPFS Cloud Gateway | `PINATA_JWT` unset or API rate limited | Generates deterministic cryptographic CIDv0 locally via SHA-256 + base58; marks upload as local-only. |
 | **Blockchain** | Polygon Amoy Testnet (Chain 80002) | RPC offline, wallet unfunded, or key unset | Writes a deterministic simulated on-chain record; flags record as `simulated: true` without failing upload. |
 | **AI Assistant** | Claude Sonnet / GPT-4o | API key unset or network timeout | Switches to `fallback.js` deterministic heuristic agent, answering strictly from live database tool calls. |
@@ -441,7 +439,7 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 ### Architecture & System Design
 
 #### Q1: What is Rubicon in one sentence?
-**Answer:** Rubicon's primary computer-vision prototype assesses paired pre- and post-disaster optical imagery with an xBD Siamese U-Net, then presents assessment results through a GIS dashboard and tool-grounded assistant. Optional IPFS and Polygon Amoy integrations provide evidence records. A separate legacy HSI/LiDAR experiment remains in the repository but is not the xBD model.
+**Answer:** Rubicon assesses paired pre- and post-disaster optical imagery with an xBD Siamese U-Net, then presents results through a GIS dashboard and tool-grounded assistant. Optional IPFS and Polygon Amoy integrations provide evidence records.
 
 #### Q2: Why did you divide the system into four separate microservices instead of a single monolith?
 **Answer:** The architecture separates distinct computational concerns:
@@ -502,8 +500,7 @@ $$\mathcal{L}_{\text{total}} = 0.4 \times \mathcal{L}_{\text{loc}} + 0.6 \times 
 
 #### Q12: What exact data is stored on the Polygon blockchain?
 **Answer:** We do **not** store large imagery files directly on-chain due to gas costs and block size limits. Instead, we store a lightweight `LogEntry` struct in `PramaanLedger.sol` containing:
-- `hsiCid`: IPFS content identifier string for the primary pre-disaster / optical file.
-- `lidarCid`: IPFS content identifier string for the post-disaster / event file.
+- `hsiCid` and `lidarCid`: historical deployed-ABI field names containing the pre- and post-disaster image CIDs, respectively.
 - `prediction`: Damage classification string (`Destroyed`, `Major Damage`, etc.).
 - `timestamp`: Block timestamp.
 - `logger`: Ethereum address of the recording authority.
@@ -549,8 +546,8 @@ This ensures that only authentic sensor files enter the processing pipeline.
 #### Q22: What is the purpose of the `/metrics` endpoint on the backend?
 **Answer:** Located at `backend/src/app.js`, `/metrics` provides a Prometheus-compatible plain-text metrics exposition tracking service uptime in seconds, total uploads accepted, completed blockchain proofs, and total application errors.
 
-#### Q23: Why do we have separate `Dockerfile` and `Dockerfile.satellite` in `ai-engine/`?
-**Answer:** `Dockerfile.satellite` packages the xBD Siamese U-Net API, served on port 8002 and configured to load the checkpoint from `RUBICON_MODEL_DIR`. The separate main `Dockerfile` packages the legacy HSI/LiDAR `/predict` service on port 8000; its model artifacts are independent of the xBD checkpoint.
+#### Q23: How is the AI engine packaged?
+**Answer:** `ai-engine/Dockerfile` packages the xBD Siamese U-Net API and drone-triage endpoint in one service on port 8002. The satellite model loads its checkpoint from `RUBICON_MODEL_DIR`; without a checkpoint, the API returns a labeled stub rather than trained-model output.
 
 #### Q24: What is the purpose of `tests/auth-hardening.test.js` in the backend?
 **Answer:** It uses `supertest` and `mongodb-memory-server` to rigorously verify session security:

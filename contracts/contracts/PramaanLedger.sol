@@ -2,7 +2,9 @@
 pragma solidity ^0.8.24;
 
 // Rubicon — Pramaan Ledger
-// Immutable record of assessment evidence (HSI/LiDAR CIDs + prediction).
+// Immutable record of assessment evidence CIDs and prediction.
+// The deployed ABI retains historical field names; the application supplies
+// the pre- and post-disaster image CIDs in those positions.
 // Deployed to the Polygon Amoy testnet (chain ID 80002) via contracts/scripts/deploy.js.
 //
 // Customization notes (see Appendix C):

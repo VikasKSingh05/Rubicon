@@ -9,11 +9,6 @@ building-localization and damage-classification heads. Assessments flow through
 the backend to the map dashboard, with optional IPFS pinning and Polygon Amoy
 proofs, and a tool-grounded AI assistant.
 
-The repository also retains a separate HSI/LiDAR inference and preprocessing
-path for the Houston 2013 experiment. That legacy path is not the xBD model or
-the primary satellite training workflow; model artifacts and results must not
-be mixed.
-
 > ⚠️ **Project status: Phase 7** — hardened vertical slice is live end-to-end
 > (register/login, upload, map, detail view, AI assistant, original-file
 > downloads, chain re-verification, password change). Sessions use short-lived
@@ -31,8 +26,7 @@ be mixed.
 
 ```
 Rubicon/
-├── ai-engine/       # xBD Siamese U-Net training, evaluation, and satellite inference
-│                    # plus separate legacy HSI/LiDAR experiment
+├── ai-engine/       # xBD Siamese U-Net training, evaluation, and inference
 ├── agent-service/   # tool-grounded chat assistant (LLM + deterministic fallback)
 ├── backend/         # Express API: upload → real inference → proof pipeline, auth
 ├── frontend/        # map-based dashboard
@@ -75,11 +69,10 @@ cp .env.example .env          # then fill in your keys (see docs/phase0-setup.md
 docker compose up --build
 
 # 3. Open the app
-# Frontend: http://localhost:3000  — register an account, then upload a scan
+# Frontend: http://localhost:3000  — register, then upload a pre/post satellite pair
 
 # Health checks
-curl http://localhost:8002/health   # xBD Siamese U-Net satellite engine
-curl http://localhost:8000/health   # separate legacy HSI/LiDAR engine
+curl http://localhost:8002/health   # xBD Siamese U-Net and drone inference engine
 curl http://localhost:8001/health   # agent-service
 curl http://localhost:4000/health   # backend
 curl http://localhost:3000/health   # frontend
@@ -115,7 +108,7 @@ mirrored as JSON under [`contracts/`](contracts/). Build against these exactly.
 | 0 | Environment, repo, contracts-first setup |
 | 1 | Stub vertical slice (upload → fake AI → map) + auth |
 | 2 | Real data exploration + preprocessing pipeline |
-| 3 | xBD optical satellite model (Siamese U-Net); HSI/LiDAR is a separate legacy experiment |
+| 3 | xBD optical satellite model (Siamese U-Net) |
 | 4 | Agentic AI layer (tool-grounded chat) |
 | 5 | IPFS + blockchain layer (Amoy) |
 | 6          | Integration, testing, polish, report |

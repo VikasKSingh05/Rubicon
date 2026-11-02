@@ -1,465 +1,113 @@
-# Rubicon — API Contracts
+# Rubicon API Contracts
 
-> **Contracts-first.** These are the exact JSON shapes that all components build against.
-> No feature code is written against a different shape. If a shape must change, update this
-> document **and** the mirrored artifacts in [`contracts/`](../contracts) in the same commit.
->
-> This document includes the original legacy HSI/LiDAR `/predict` contract and the
-> current xBD satellite routes. For the mentor-facing model workflow, use the xBD
-> routes and model versions; the legacy Houston experiment is separate.
+These are the current service contracts. Satellite assessment uses xBD
+pre/post optical imagery and the Siamese U-Net. The separate Stage 2 endpoint
+accepts drone imagery. New uploads do not accept the retired scan format.
 
-## Table of contents
+## 1. AI engine
 
-1. [Legacy AI engine `POST /predict` response](#1-legacy-hsilidar-ai-engine-post-predict-response)
-2. [Backend `POST /upload` response](#2-backend-post-upload-response)
-3. [Backend `GET /assessments` (list)](#3-backend-get-assessments-list)
-4. [Backend `GET /assessments/:id` (detail)](#4-backend-get-assessmentsid-detail)
-5. [Agent `POST /agent/query` response](#5-agent-post-agentquery-response)
-6. [MongoDB `Assessment` schema](#6-mongodb-assessment-schema)
-7. [Assessment state machine](#7-assessment-state-machine)
-8. [Severity color mapping](#8-severity-color-mapping)
-9. [Auth, file downloads, and ops endpoints](#9-auth-file-downloads-and-ops-endpoints)
+### `POST /infer/satellite`
 
----
+Multipart fields `pre` and `post` are required. Each accepts PNG, JPEG, or
+GeoTIFF. The response is defined in
+[`contracts/satellite.response.json`](../contracts/satellite.response.json)
+and contains the source image SHA-256 values, building and H3-cell
+FeatureCollections, `damage_classes`, execution time, and `model_version`.
 
-## 1. Legacy HSI/LiDAR AI engine `POST /predict` response
+The no-checkpoint result is labeled `stub-satellite-v0`. Check
+`GET /health` and require `model_loaded: true` before reporting model output.
 
-`POST /predict` is retained for the separate Houston HSI/LiDAR experiment on port 8000.
-It is **not** the xBD Siamese U-Net endpoint. The frontend does not call the engine directly.
+### `POST /infer/drone`
 
-**Request body** (multipart `form-data`; the backend forwards the exact uploaded buffers):
+Multipart field `image` is required. Optional fields are `parent_cell_id`,
+`lat`, and `lon`. It returns damage severity, failure-mode analysis, image
+hash, and model version as defined in
+[`contracts/drone.response.json`](../contracts/drone.response.json).
 
-```json
-{
-  "hsi": "<file>",
-  "lidar": "<file>"
-}
-```
+## 2. Backend assessment upload
 
-**Response `200 OK`** — exact shape:
+### `POST /upload`
 
-```json
-{
-  "prediction": "Severe Collapse",
-  "confidence": 0.91,
-  "class_probs": {
-    "None": 0.02,
-    "Moderate": 0.07,
-    "Severe Collapse": 0.91
-  },
-  "geojson_polygon": {
-    "type": "Polygon",
-    "coordinates": [[[lng, lat], [lng, lat], [lng, lat], [lng, lat]]]
-  },
-  "model_version": "mamba_transformer-v1"
-}
-```
+Requires authentication and two image files:
 
-> The legacy model may report `mamba_transformer-v1`; the backend may return `stub-v0`
-> when that legacy service is unavailable. Neither value indicates xBD model inference.
+| Field | Accepts |
+| --- | --- |
+| `pre` | PNG, JPEG, or TIFF |
+| `post` | PNG, JPEG, or TIFF |
 
-| Field             | Type                 | Notes                                                |
-| ----------------- | -------------------- | ---------------------------------------------------- |
-| `prediction`      | string               | Human-readable damage class label.                   |
-| `confidence`      | number (0–1)         | Model confidence in the predicted class.             |
-| `class_probs`     | object<string,number>| Softmax probabilities across all damage classes.     |
-| `geojson_polygon` | GeoJSON Polygon      | Map polygon for the assessed zone (lng, lat coords). |
-| `model_version`   | string               | Legacy HSI/LiDAR model identifier or `stub-v0`; not an xBD model version. |
-
-### 1.1 xBD satellite Siamese U-Net
-
-The primary optical satellite inference service runs on port 8002 at
-**`POST /infer/satellite`**, accepting multipart fields `pre` and `post` (PNG,
-JPEG, or GeoTIFF). The authenticated backend proxy is **`POST /satellite`**;
-the main assessment upload endpoint **`POST /upload`** also accepts the same
-`pre`/`post` pair and forwards it to the satellite service.
-
-The xBD response contains image hashes, building and H3-cell GeoJSON,
-`damage_classes`, and `model_version`. See the exact response schema in
-[`contracts/satellite.response.json`](../contracts/satellite.response.json).
-When no serving checkpoint is present, the engine may return
-`stub-satellite-v0`; check `GET /health` on port 8002 for `model_loaded: true`
-before presenting a request as trained-model inference.
-
----
-
-## 2. Backend `POST /upload` response
-
-The backend accepts an xBD image pair (`pre` and `post`; PNG, JPEG, or TIFF)
-at **`POST /upload`** and returns the created assessment. It also retains
-`hsi` + `lidar` fields for the separate legacy experiment.
-
-**Request:** `multipart/form-data` with fields `pre` and `post` (files).
-
-**Response `201 Created`** — exact shape:
+The backend validates the file extension and magic bytes, persists the
+originals, runs satellite inference, and attaches proof metadata. Example
+response:
 
 ```json
 {
   "assessmentId": "665d8f3e2f3a4b5c6d7e8f90",
   "state": "analyzed",
-  "prediction": "Destroyed",
-  "confidence": 0.91,
+  "prediction": "No Damage",
+  "confidence": 0.8,
   "class_probs": {
-    "No Damage": 0.02,
-    "Minor Damage": 0.03,
-    "Major Damage": 0.04,
-    "Destroyed": 0.91
+    "No Damage": 0.8,
+    "Minor Damage": 0.1,
+    "Major Damage": 0.05,
+    "Destroyed": 0.05
   },
   "geojson_polygon": {
     "type": "Polygon",
-    "coordinates": [[[lng, lat], [lng, lat], [lng, lat], [lng, lat]]]
+    "coordinates": [[[ -122.71, 38.44 ], [ -122.70, 38.44 ], [ -122.70, 38.45 ], [ -122.71, 38.45 ], [ -122.71, 38.44 ]]]
   },
-  "model_version": "siamese-resnet34-unet-xbd",
-  "createdAt": "2026-09-07T12:00:00.000Z",
-  "links": {
-    "detail": "/assessments/665d8f3e2f3a4b5c6d7e8f90"
-  }
+  "model_version": "stub-satellite-v0",
+  "createdAt": "2026-11-02T00:00:00.000Z",
+  "links": { "detail": "/assessments/665d8f3e2f3a4b5c6d7e8f90" }
 }
 ```
 
-> For xBD uploads, the backend forwards `pre` and `post` to the satellite
-> Siamese U-Net service and stores its result. If the checkpoint/service is
-> unavailable, the response identifies the stub model instead. Legacy
-> `hsi`/`lidar` uploads follow the separate `/predict` path. `state` is
-> `analyzed` (or `chain_logged` when the Amoy proof layer is configured; see §7).
+The exact response shape is mirrored in
+[`contracts/upload.response.json`](../contracts/upload.response.json). A
+successful request may still be a stub; inspect `model_version`.
 
-| Field      | Type                        | Notes                                        |
-| ---------- | --------------------------- | -------------------------------------------- |
-| `assessmentId` | string (ObjectId hex)  | Stored assessment identifier.                |
-| `state`    | enum (see §7)               | `uploaded` \| `analyzing` \| `analyzed` \| … |
-| `prediction` | string                   | Damage class label.                          |
-| `confidence` | number (0–1)             | Model confidence.                            |
-| `class_probs` | object<string,number>  | Per-class probabilities.                     |
-| `geojson_polygon` | GeoJSON Polygon      | Assessment polygon.                          |
-| `model_version` | string                | Model identifier.                            |
-| `createdAt` | string (ISO-8601)          | Server timestamp.                            |
-| `links.detail` | string                 | Relative URL to the detail endpoint.         |
+## 3. Assessments
 
----
+`GET /assessments?limit=&offset=` returns the authenticated user's newest
+assessments with pagination. List items contain the prediction, confidence,
+severity, map polygon and center, chain status, and creation time. The example
+is in [`contracts/assessments.list.response.json`](../contracts/assessments.list.response.json).
 
-## 3. Backend `GET /assessments` (list)
+`GET /assessments/:id` returns the complete assessment, including `filename`,
+`storage`, `class_probs`, `preCid`, `postCid`, chain status, and timestamps.
+Existing records may also contain historical CID aliases; the backend retains
+read compatibility but new uploads populate the pre/post fields.
 
-Returns the caller's assessments, newest first. Paginated with `?limit=` (default 50, max 200)
-and `?offset=` (default 0).
+`GET /assessments/:id/cells` returns a GeoJSON FeatureCollection for map
+visualization. `GET /assessments/:id/verify` checks the first image CID against
+the configured ledger and returns database state when chain verification is
+unavailable.
 
-**Response `200 OK`:**
+## 4. File downloads
 
-```json
-{
-  "assessments": [
-    {
-      "id": "665d8f3e2f3a4b5c6d7e8f90",
-      "prediction": "Severe Collapse",
-      "confidence": 0.91,
-      "severity": "severe",
-      "state": "analyzed",
-      "center": { "lng": -95.36, "lat": 29.76 },
-      "geojson_polygon": { "type": "Polygon", "coordinates": [[[-95.36, 29.76], [-95.36, 29.77], [-95.35, 29.77], [-95.35, 29.76], [-95.36, 29.76]]] },
-      "txHash": null,
-      "chainVerified": false,
-      "createdAt": "2026-09-07T12:00:00.000Z"
-    }
-  ],
-  "total": 1,
-  "limit": 50,
-  "offset": 0
-}
+`GET /files/:id/pre` and `GET /files/:id/post` stream the original paired
+images. Both routes require authentication and enforce assessment ownership.
+Historical file-kind aliases remain readable for existing records.
+
+## 5. Assessment states and severity
+
+```text
+uploaded -> analyzing -> analyzed -> chain_pending -> chain_logged
+                 \-> error
 ```
 
-| Field         | Type              | Notes                                             |
-| ------------- | ----------------- | ------------------------------------------------- |
-| `assessments` | array<ListItem>   | Map-marker payloads (envelope `center`).          |
-| `total`       | number            | Total items for the user (for pagination).        |
-| `limit`       | number            | Echo of the applied limit.                        |
-| `offset`      | number            | Echo of the applied offset.                       |
+Without Polygon configuration, the proof is simulated and the state remains
+`analyzed`. `chainVerified` is false for simulated records.
 
-`severity` uses the lowercase enum `none | moderate | severe` (see §8). `txHash`/`chainVerified`
-power the map-popup chain affordance (null/empty when the proof layer was simulated).
+The xBD damage classes are `No Damage`, `Minor Damage`, `Major Damage`, and
+`Destroyed`. The dashboard maps these classes to the existing `none`,
+`moderate`, and `severe` display severities.
 
----
+## 6. Compatibility boundary
 
-## 4. Backend `GET /assessments/:id` (detail)
+The deployed PramaanLedger contract has a positional pair of CID arguments.
+New satellite image CIDs are supplied in those positions without changing the
+existing contract interface. Historical MongoDB fields and file-download
+aliases are retained only to keep old assessment records readable.
 
-Full record for one assessment (`POST /upload` links to it via `links.detail`). Returns the
-stored document serialized to JSON: everything in the list shape **plus** `user`,
-`filename`, `storage`, `class_probs`, `model_version`, `hsiCid`/`lidarCid`, `timestamps`,
-and the `severity` virtual.
-
-**Response `200 OK`:**
-
-```json
-{
-  "id": "665d8f3e2f3a4b5c6d7e8f90",
-  "user": "66aa…",
-  "state": "analyzed",
-  "prediction": "Severe Collapse",
-  "confidence": 0.91,
-  "class_probs": { "None": 0.02, "Moderate": 0.07, "Severe Collapse": 0.91 },
-  "geojson_polygon": { "type": "Polygon", "coordinates": [] },
-  "model_version": "stub-v0",
-  "severity": "severe",
-  "filename": { "hsi": "scan.tiff", "lidar": "scan.laz" },
-  "storage": { "hsi": "<assessmentId>/hsi.tiff", "lidar": "<assessmentId>/lidar.laz" },
-  "hsiCid": "Qm…",
-  "lidarCid": "Qm…",
-  "txHash": null,
-  "chainVerified": false,
-  "timestamps": { "uploaded": "2026-09-07T12:00:00.000Z", "analyzed": "2026-09-07T12:00:05.000Z" },
-  "createdAt": "2026-09-07T12:00:00.000Z",
-  "updatedAt": "2026-09-07T12:00:05.000Z"
-}
-```
-
-`storage.hsi`/`storage.lidar` (relative paths under the backend's `STORAGE_DIR`) power the
-`GET /files/:id/:kind` download endpoints (see §9). `401` without a bearer token; `404` for a
-missing assessment or one owned by a different user.
-
----
-
-## 5. Agent `POST /agent/query` response
-
-`agent-service` exposes **`POST /agent/query`** for the chat panel. The agent is
-**tool-grounded** — it answers only from tool results, never from the LLM's internal knowledge.
-
-**Request body:**
-
-```json
-{
-  "query": "Which zones are severe and unlogged?",
-  "assessmentId": "665d8f3e2f3a4b5c6d7e8f90",
-  "token": "<optional> user JWT forwarded to backend tool calls"
-}
-```
-
-**Response `200 OK`** — exact shape:
-
-```json
-{
-  "answer": "There are 3 severe zones. Two are already verified on-chain; one (zone 665d…8f90) is not yet logged.",
-  "tool_calls": [
-    {
-      "tool": "get_recent_assessments",
-      "input": { "severity_filter": "severe", "limit": 20 },
-      "ok": true
-    },
-    {
-      "tool": "get_chain_status",
-      "input": { "cid": "Qm123…" },
-      "ok": true
-    }
-  ],
-  "createdAt": "2026-09-07T12:30:00.000Z"
-}
-```
-
-| Field        | Type                  | Notes                                                     |
-| ------------ | --------------------- | --------------------------------------------------------- |
-| `answer`     | string                | Final plain-language answer.                              |
-| `tool_calls` | array<ToolCall>       | Enables the "🔧 checked recent assessments" chips in UI. |
-| `createdAt`  | string (ISO-8601)     | Timestamp.                                                |
-
-**ToolCall object:**
-
-| Field   | Type           | Notes                          |
-| ------- | -------------- | ------------------------------ |
-| `tool`  | string         | Tool name.                     |
-| `input` | object         | Arguments passed to the tool.  |
-| `ok`    | boolean        | Whether the tool call succeeded. |
-
-**Grounding rule:** the agent must answer strictly from tool results. If a tool returns no
-data, it says so (e.g. `"I don't have data for that zone."`) rather than guessing. This is a
-**demo-grade, tool-grounded agent**, not a certified emergency system.
-
-**Defined tools:**
-
-- `get_recent_assessments(severity_filter, limit)` → queries backend Mongo-backed API.
-- `get_assessment(id)` → full record for one assessment (confidence, probs, chain fields).
-- `get_chain_status(cid)` → calls backend `/chain/verify/:cid` (on-chain event lookup when the Amoy layer is configured; DB-backed otherwise).
-- `summarize_zone(geojson)` → stats summary (area, class, confidence).
-
-The agent may run the tools through an LLM tool-calling loop (Anthropic, OpenAI, or
-OpenRouter, selected by `LLM_PROVIDER`) or, when no key is set, through a deterministic
-fallback agent. Both paths obey the same grounding rule above.
-
----
-
-## 6. MongoDB `Assessment` schema
-
-Stored by the backend in MongoDB. Shape (document):
-
-```json
-{
-  "_id": "665d8f3e2f3a4b5c6d7e8f90",
-  "user": "665d00000000000000000001",
-  "state": "analyzed",
-  "filename": {
-    "hsi": "houstn_2013_region1.tiff",
-    "lidar": "houstn_2013_region1.las"
-  },
-  "prediction": "Severe Collapse",
-  "confidence": 0.91,
-  "class_probs": {
-    "None": 0.02,
-    "Moderate": 0.07,
-    "Severe Collapse": 0.91
-  },
-  "geojson_polygon": {
-    "type": "Polygon",
-    "coordinates": [[[lng, lat], [lng, lat], [lng, lat], [lng, lat]]]
-  },
-  "model_version": "stub-v0",
-  "hsiCid": null,
-  "lidarCid": null,
-  "txHash": null,
-  "chainVerified": false,
-  "timestamps": {
-    "uploaded": "2026-09-07T12:00:00.000Z",
-    "analyzing": "2026-09-07T12:00:01.000Z",
-    "analyzed": "2026-09-07T12:00:04.000Z",
-    "chainPending": null,
-    "chainLogged": null
-  },
-  "createdAt": "2026-09-07T12:00:00.000Z",
-  "updatedAt": "2026-09-07T12:00:04.000Z"
-}
-```
-
-| Field          | Type                       | Notes                                                      |
-| -------------- | -------------------------- | ---------------------------------------------------------- |
-| `_id`          | ObjectId                   | Primary key.                                               |
-| `user`         | ObjectId                   | Owning user (from JWT).                                    |
-| `state`        | enum (see §7)              | Current assessment state.                                  |
-| `filename`     | object `{hsi, lidar}`      | Original uploaded filenames.                               |
-| `prediction`   | string                     | Damage class label.                                        |
-| `confidence`   | number (0–1)               | Model confidence.                                          |
-| `class_probs`  | object<string,number>      | Per-class probabilities.                                   |
-| `geojson_polygon` | GeoJSON Polygon        | Assessment polygon.                                        |
-| `model_version`| string                     | Model identifier.                                          |
-| `storage`      | object \| null             | `{ hsi: "<relative path>", lidar: "<relative path>" }` persisted originals (Phase 7). |
-| `hsiCid`       | string \| null             | IPFS CID of HSI file (Phase 5).                            |
-| `lidarCid`     | string \| null             | IPFS CID of LiDAR file (Phase 5).                          |
-| `txHash`       | string \| null             | Amoy transaction hash for the on-chain log (Phase 5).      |
-| `chainVerified`| boolean                    | Whether verified on-chain (Phase 5).                       |
-| `timestamps`   | object of ISO-8601 \| null | Per-state timestamps; mirrors the state machine.           |
-| `createdAt` / `updatedAt` | ISO-8601        | Audit timestamps.                                          |
-
----
-
-## 7. Assessment state machine
-
-```
-uploaded ──► analyzing ──► analyzed ──► chain_pending ──► chain_logged
-                  │
-                  └────────────► error
-```
-
-| State           | Phase of origin | Meaning                                          |
-| --------------- | --------------- | ------------------------------------------------ |
-| `uploaded`      | Phase 1         | File received, validation passed.                |
-| `analyzing`     | Phase 1         | AI inference in progress (simulated in Ph 1).    |
-| `analyzed`      | Phase 1         | Inference complete, result stored.               |
-| `chain_pending` | Phase 5         | IPFS pinning / on-chain tx submitted.            |
-| `chain_logged`  | Phase 5         | On-chain log confirmed (real txHash).            |
-| `error`         | Phase 7         | Upload pipeline failed after files were accepted (persistence, inference, or proof). |
-
-> Phase 5 runs the real proof pipeline for every upload: uploads are content-addressed
-> as IPFS CIDv0 values (pinned via Pinata when `PINATA_JWT` is set) and, when the Amoy
-> layer is configured (`AMOY_RPC_URL` + `DEPLOYER_PRIVATE_KEY` + `CONTRACT_ADDRESS`),
-> the assessment is logged on-chain (`chain_pending → chain_logged`, `chainVerified: true`).
-> Without chain config the upload falls back to a **deterministic simulated record**
-> (fake `txHash`, `chainVerified: false`, state stays `analyzed`) so the app runs fully
-> offline. Real CIDv0 hashes are produced locally regardless of Pinata availability.
-
----
-
-## 8. Severity color mapping
-
-From the **Global Design System** — pairs icon + label with color (never color alone).
-
-| Severity | Hex        | Icon | Label            |
-| -------- | ---------- | ---- | ---------------- |
-| None/Moderate-low | `#22C55E` | —        | None / Minimal |
-| Moderate | `#F59E0B`  | ⚠          | Moderate        |
-| Severe   | `#DC2626`  | ⚠          | Severe         |
-
-Verified-on-chain badge: `#0EA5E9` with a checkmark icon (visually prominent — core differentiator).
-
----
-
-## 9. Auth, file downloads, and ops endpoints
-
-Registration and login return the **same session shape** (the difference is only
-the HTTP status, `201` vs `200`):
-
-```json
-{
-  "token": "<short-lived JWT, held in browser memory only>",
-  "user": { "id": "66aa…", "email": "a@example.com" }
-}
-```
-
-The refresh token is **not** in the body. It is set as an `httpOnly;
-SameSite=Strict; Path=/auth` cookie named `rubicon_refresh` (7-day TTL,
-rotated on every use, revocable server-side; the DB stores only its sha-256).
-
-| Endpoint | Action |
-| --- | --- |
-| `POST /auth/register` `{ email, password }` | Creates the user; min password length **8**. `409` on duplicate email. |
-| `POST /auth/login` `{ email, password }` | Issues a session; `401` on bad credentials. |
-| `POST /auth/refresh` (cookie) | Rotates the refresh cookie and mints a fresh access token. Reused/revoked cookies → `401`. |
-| `POST /auth/logout` (cookie) | Revokes the refresh session and clears the cookie. |
-| `POST /auth/change-password` `{ currentPassword, newPassword }` | Bearer-authenticated; validates the current password, enforces min length 8, revokes **all** other refresh sessions, `{ ok: true }`. |
-
-| Download endpoint | Action |
-| --- | --- |
-| `GET /files/:id/hsi` / `GET /files/:id/lidar` | Bearer-authenticated, owner-scoped stream of the persisted original (path-traversal safe, path pinned inside `STORAGE_DIR`). `404` for other users / missing files; `400` for a non-`hsi`/`lidar` kind.
-
-Protected routes take `Authorization: Bearer <accessToken>`. The frontend's API
-client replays a `401` once after refreshing; `/auth/*` paths are never replayed.
-Uploads additionally spool to disk and are magic-byte validated (TIFF `II*\0` /
-`MM\0*`, LAS `LASF`) before inference.
-
-Rate limits: `/auth` 10 req / 15 min / IP, `/upload` 20 req / 15 min / IP
-(return `429 { "error": "too many requests" }`).
-
-### Chain verification
-
-**`GET /chain/verify/:cid`** (bearer-authenticated) — on-chain proof status for a content
-address. When the Amoy layer is configured it scans `AssessmentLogged` events starting from
-the persisted `ChainIndex` cursor; otherwise it answers from the database.
-
-**Response `200 OK`:**
-
-```json
-{
-  "cid": "Qm123…",
-  "verified": false,
-  "txHash": null,
-  "assessmentId": null,
-  "state": null
-}
-```
-
-`verified: true` with a real `txHash` when the CIDs were logged on-chain; for a simulated
-proof the record still resolves to the stored assessment (`assessmentId`/`state` populated)
-with `verified: false`.
-
-### Ops endpoints
-
-| Endpoint | Service | Notes |
-| --- | --- | --- |
-| `GET /health` | backend, ai-engine, agent-service, frontend | Liveness + readiness (backend reports Mongo state; ai-engine reports `model_loaded`). |
-| `GET /metrics` | backend | Prometheus text: `rubicon_uploads_total`, `rubicon_proofs_total`, `rubicon_errors_total`, `process_uptime_seconds`. |
-| `GET /tools` | agent-service | Lists the tool-grounded agent's available tools. |
-
----
-
-## Appendix — artifact map
-
-| Shape                        | Mirror file                                         |
-| ---------------------------- | --------------------------------------------------- |
-| AI `/predict` response       | [`contracts/predict.response.json`](../contracts/predict.response.json) |
-| Backend `/upload` response   | [`contracts/upload.response.json`](../contracts/upload.response.json)   |
-| Backend `GET /assessments`   | [`contracts/assessments.list.response.json`](../contracts/assessments.list.response.json) |
-| Agent `/agent/query` response| [`contracts/agent-query.response.json`](../contracts/agent-query.response.json) |
-| Mongo `Assessment` schema     | [`contracts/assessment.schema.json`](../contracts/assessment.schema.json) |
+Authentication, agent, and health response contracts remain documented by
+their service routes and the JSON artifacts in [`contracts/`](../contracts/).

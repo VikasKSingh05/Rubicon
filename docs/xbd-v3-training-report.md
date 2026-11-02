@@ -21,9 +21,8 @@ disaster events, so the aggregate should be interpreted cautiously.
 
 ## 1. Model selection and intended use
 
-The selected model is the xBD Siamese U-Net, not Rubicon's separate legacy
-HSI/LiDAR experiment. xBD provides paired optical imagery before and after a
-disaster and building-damage labels. A shared Siamese encoder can represent
+The selected model is the xBD Siamese U-Net. xBD provides paired optical
+imagery before and after a disaster and building-damage labels. A shared Siamese encoder can represent
 both scenes in the same feature space, while pre/post feature differences
 make changes available to the decoder. A U-Net-style decoder preserves
 spatial detail needed for pixel-level localization and damage maps.

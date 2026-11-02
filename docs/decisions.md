@@ -3,15 +3,16 @@
 Decisions are recorded here so future work does not re-litigate them. Each
 entry states the decision, the reason, and the consequence.
 
-## 1. Additive migration, not a rewrite
+## 1. xBD is the only satellite assessment workflow
 
-- **Decision:** Extend the existing monorepo in place. Keep the legacy
-  `POST /predict` and `POST /upload` routes working while adding
-  `/infer/satellite`, `/infer/drone`, and `/assessments`.
-- **Reason:** Existing auth, rate limiting, IPFS/Pinata, and Polygon Amoy proof
-  logic already work and are covered by tests.
-- **Consequence:** Some legacy HSI/LiDAR code remains (`ai-engine/src/`); it is
-  not on the xBD path and must not be deleted without a migration plan.
+- **Decision:** Accept pre/post optical satellite imagery at `POST /upload` and
+  run it through the xBD Siamese U-Net at `POST /infer/satellite`. Keep
+  `/infer/drone` as a separate Stage 2 feature.
+- **Reason:** The Houston HSI/LiDAR experiment and Mamba-Transformer are not
+  part of the current application or its trained model.
+- **Consequence:** New uploads and training use xBD exclusively. Historical
+  database fields and file-download aliases remain readable, while the
+  deployed ledger's positional CID interface is kept compatible.
 
 ## 2. MongoDB + `2dsphere`, not PostGIS
 

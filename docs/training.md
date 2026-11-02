@@ -103,12 +103,12 @@ building pixels, and the predicted-class histogram/percentages inside the
 localization head's predicted building mask. Use the actual tile count printed
 by the run; do not cap validation for this comparison.
 
-The run writes `data/models/xbd/training_metrics.json`, which records the
+The run writes `data/models/xbd-v3/training_metrics.json`, which records the
 dataset path and mode, model/parameter counts, hardware profile,
 hyperparameters, event and tile counts, split warnings, best epoch, and
 per-epoch training/validation history. `checkpoint_best.pt` is the checkpoint
 selected by event-disjoint validation; `checkpoint_last.pt` can resume
-training. Both are kept separate from the HSI/LiDAR model artifacts.
+training.
 
 ### Existing CLI examples
 
@@ -124,7 +124,7 @@ python train.py --config cpu --epochs 1 --subset 0.002 --max-val 2 \
   --no-pretrained --output-dir data/models/smoke
 
 # Resume
-python train.py --resume data/models/checkpoint_last.pt --epochs 30
+python train.py --resume data/models/xbd/checkpoint_last.pt --epochs 30
 ```
 
 Outputs in `--output-dir` (default `data/models`):
@@ -134,7 +134,6 @@ Outputs in `--output-dir` (default `data/models`):
 | `checkpoint_last.pt` | weights + optimizer/scheduler/scaler + metrics | yes |
 | `checkpoint_best.pt` | best-xView2 weights + config + norm stats | no |
 | `siamese_unet.pt` | same as best; serving artifact | no |
-| `model.pt` | same as best; legacy serving path | no |
 
 ## 4. Evaluation and mentor demo
 
@@ -174,14 +173,13 @@ The Compose satellite service is configured to load that directory. From the
 repository root, rebuild/restart it after training:
 
 ```powershell
-docker compose up -d --build ai-engine-satellite
+docker compose up -d --build ai-engine
 Invoke-RestMethod http://localhost:8002/health
 ```
 
 The health response should report `"model_loaded": true`. The backend's
-satellite upload flow forwards pre/post image pairs to this service; the
-legacy HSI/LiDAR engine remains separate. For a native local service instead
-of Docker, run from `ai-engine`:
+satellite upload flow forwards pre/post image pairs to this service. For a
+native local service instead of Docker, run from `ai-engine`:
 
 ```powershell
 $env:RUBICON_MODEL_DIR = (Resolve-Path .\data\models\xbd).Path

@@ -114,7 +114,7 @@ To prevent spatial autocorrelation and test real generalization, tiles are **nev
 
 Per-class IoU on the 12-tile check: `background=0.9994`, `no-damage=0.9795`, `minor-damage=1.0000`, `major-damage=1.0000`, `destroyed=1.0000`.
 
-Class frequencies (200 tiles): background 77.51% of all pixels; among building pixels: `no-damage` 95.52%, `minor-damage` 0.37%, `major-damage` 0.94%, `destroyed` 3.18%. This is the imbalance the focal/Lovász loss and the severe-damage weighted sampler are designed for.
+Class frequencies (200 tiles): background 77.51% of all pixels; among building pixels: `no-damage` 95.52%, `minor-damage` 0.37%, `major-damage` 0.94%, `destroyed` 3.18%. Damage loss uses training-pixel-frequency-derived class weights on ground-truth building pixels; training does not use weighted oversampling.
 
 Regenerate all of the above plus qualitative overlays:
 

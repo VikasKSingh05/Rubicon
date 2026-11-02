@@ -1,12 +1,25 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Assessment",
-  "description": "MongoDB assessment document. chain fields (hsiCid, lidarCid, txHash, chainVerified) are null in Phase 0/1 and filled in Phase 5.",
+  "description": "Satellite assessment created from an xBD pre/post image pair. Historical aliases are optional and read-only compatibility fields.",
   "type": "object",
   "required": [
-    "_id", "user", "state", "filename", "prediction", "confidence",
-    "class_probs", "geojson_polygon", "model_version", "hsiCid",
-    "lidarCid", "txHash", "chainVerified", "timestamps", "createdAt", "updatedAt"
+    "_id",
+    "user",
+    "state",
+    "filename",
+    "prediction",
+    "confidence",
+    "class_probs",
+    "geojson_polygon",
+    "model_version",
+    "preCid",
+    "postCid",
+    "txHash",
+    "chainVerified",
+    "timestamps",
+    "createdAt",
+    "updatedAt"
   ],
   "properties": {
     "_id": { "type": "string", "description": "ObjectId hex" },
@@ -18,38 +31,41 @@
     "filename": {
       "type": "object",
       "properties": {
-        "hsi": { "type": "string" },
-        "lidar": { "type": "string" }
-      },
-      "required": ["hsi", "lidar"]
+        "pre": { "type": ["string", "null"] },
+        "post": { "type": ["string", "null"] },
+        "hsi": { "type": ["string", "null"], "deprecated": true },
+        "lidar": { "type": ["string", "null"], "deprecated": true }
+      }
     },
     "storage": {
       "type": "object",
       "properties": {
-        "hsi": { "type": ["string", "null"] },
-        "lidar": { "type": ["string", "null"] }
+        "pre": { "type": ["string", "null"] },
+        "post": { "type": ["string", "null"] },
+        "hsi": { "type": ["string", "null"], "deprecated": true },
+        "lidar": { "type": ["string", "null"], "deprecated": true }
       }
     },
-    "prediction": { "type": "string" },
-    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "prediction": { "type": ["string", "null"] },
+    "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
     "class_probs": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": { "type": "number" }
     },
     "geojson_polygon": {
-      "type": "object",
+      "type": ["object", "null"],
       "required": ["type", "coordinates"],
       "properties": {
         "type": { "const": "Polygon" },
-        "coordinates": {
-          "type": "array",
-          "description": "array of [lng, lat] rings"
-        }
+        "coordinates": { "type": "array", "description": "array of [longitude, latitude] rings" }
       }
     },
-    "model_version": { "type": "string" },
-    "hsiCid": { "type": ["string", "null"] },
-    "lidarCid": { "type": ["string", "null"] },
+    "model_version": { "type": ["string", "null"] },
+    "buildings_geojson": { "type": ["object", "null"] },
+    "preCid": { "type": ["string", "null"] },
+    "postCid": { "type": ["string", "null"] },
+    "hsiCid": { "type": ["string", "null"], "deprecated": true },
+    "lidarCid": { "type": ["string", "null"], "deprecated": true },
     "txHash": { "type": ["string", "null"] },
     "chainVerified": { "type": "boolean" },
     "timestamps": {
