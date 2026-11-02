@@ -16,9 +16,17 @@ const OBJECT_ID_RE = /^[0-9a-fA-F]{24}$/;
 const router = Router();
 
 function kindToType(kind) {
-  if (kind === "pre") return { mime: "image/png", label: "Pre-Disaster Satellite" };
-  if (kind === "post") return { mime: "image/png", label: "Post-Disaster Satellite" };
-  return kind === "hsi" ? { mime: "image/tiff", label: "HSI" } : { mime: "application/octet-stream", label: "LiDAR" };
+  if (kind === "pre") return "Pre-Disaster Satellite Image";
+  if (kind === "post") return "Post-Disaster Satellite Image";
+  return kind === "hsi" ? "Legacy Input A" : "Legacy Input B";
+}
+
+function mimeType(filename) {
+  const extension = path.extname(filename || "").toLowerCase();
+  if (extension === ".png") return "image/png";
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".tif" || extension === ".tiff") return "image/tiff";
+  return "application/octet-stream";
 }
 
 // GET /files/:id/:kind — stream the persisted original. Path-traversal safe:
@@ -31,14 +39,19 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { id, kind } = req.params;
-    if (!KINDS.has(kind)) return res.status(400).json({ error: "kind must be 'hsi' or 'lidar'" });
+    if (!KINDS.has(kind)) return res.status(400).json({ error: "kind must be 'pre' or 'post'" });
     if (!OBJECT_ID_RE.test(id)) return res.status(404).json({ error: "assessment not found" });
 
     const assessment = await Assessment.findById(id);
     if (!assessment) return res.status(404).json({ error: "assessment not found" });
     if (assessment.user.toString() !== req.user.sub) return res.status(404).json({ error: "assessment not found" });
 
-    const rel = assessment.storage?.[kind];
+    const canonicalKind = kind === "hsi" ? "pre" : kind === "lidar" ? "post" : kind;
+    const legacyKind = canonicalKind === "pre" ? "hsi" : "lidar";
+    const resolvedKind = assessment.storage?.[canonicalKind]
+      ? canonicalKind
+      : legacyKind;
+    const rel = assessment.storage?.[resolvedKind];
     if (!rel) return res.status(404).json({ error: "file not found" });
 
     const abs = path.resolve(config.storageDir, rel);
@@ -52,10 +65,9 @@ router.get(
       return res.status(404).json({ error: "file not found" });
     }
 
-    const { mime, label } = kindToType(kind);
-    const original = assessment.filename?.[kind];
-    const download = original ?? `${label} data`;
-    res.type(mime).setHeader("Content-Disposition", `attachment; filename="${download.replace(/"/g, "")}"`);
+    const original = assessment.filename?.[resolvedKind];
+    const download = original ?? kindToType(canonicalKind);
+    res.type(mimeType(original || rel)).setHeader("Content-Disposition", `attachment; filename="${download.replace(/"/g, "")}"`);
     createReadStream(abs).on("error", () => res.destroy()).pipe(res);
   }),
 );

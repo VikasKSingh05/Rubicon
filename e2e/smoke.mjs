@@ -1,7 +1,7 @@
 /**
  * Rubicon end-to-end smoke test.
  *
- * Drives the real, running stack (backend + ai-engine + agent-service + frontend)
+ * Drives the real, running stack (backend + xBD AI engine + agent-service + frontend)
  * through every user-facing flow and asserts the responses against the contracts
  * in docs/api-contracts.md. Zero dependencies: Node's global fetch/FormData only.
  *
@@ -11,17 +11,13 @@
  *
  * Exits 0 when every check passes, 1 otherwise (CI gate).
  */
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FIXTURES = join(__dirname, "fixtures", "scan");
-const HSI_FIXTURE = join(FIXTURES, "hsi.tiff");
-const LIDAR_FIXTURE = join(FIXTURES, "lidar.las");
+const SAMPLE_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=",
+  "base64",
+);
 
 const BACKEND = process.env.E2E_BACKEND || "http://localhost:4000";
-const ENGINE = process.env.E2E_ENGINE || "http://localhost:8000";
+const ENGINE = process.env.E2E_ENGINE || "http://localhost:8002";
 const AGENT = process.env.E2E_AGENT || "http://localhost:8001";
 const FRONTEND = process.env.E2E_FRONTEND || "http://localhost:3000";
 
@@ -75,14 +71,10 @@ function check(name, ok, detail) {
 
 const section = (title) => console.log(`\n[${title}]`);
 
-function scanForm() {
-  const hsi = new Blob([readFileSync(HSI_FIXTURE)], { type: "image/tiff" });
-  const lidar = new Blob([readFileSync(LIDAR_FIXTURE)], {
-    type: "application/octet-stream",
-  });
+function satelliteForm() {
   const form = new FormData();
-  form.append("hsi", hsi, "houston_sample.tif");
-  form.append("lidar", lidar, "houston_sample.las");
+  form.append("pre", new Blob([SAMPLE_PNG], { type: "image/png" }), "pre.png");
+  form.append("post", new Blob([SAMPLE_PNG], { type: "image/png" }), "post.png");
   return form;
 }
 
@@ -95,7 +87,7 @@ async function run() {
   section("1. health / liveness");
   const engineHealth = await call(`${ENGINE}/health`);
   check(
-    "ai-engine /health reports the served artifact",
+    "xBD AI engine /health reports the served model",
     engineHealth.res.ok && engineHealth.json?.service === "ai-engine" && engineHealth.json?.model_loaded === true,
     `status=${engineHealth.res.status} body=${engineHealth.text.slice(0, 160)}`,
   );
@@ -122,31 +114,21 @@ async function run() {
     `status=${frontendIndex.res.status}`,
   );
 
-  section("2. ai-engine /predict (real model path)");
-  const enginePredict = await call(`${ENGINE}/predict`, { method: "POST", body: scanForm() });
+  section("2. xBD Siamese U-Net inference");
+  const enginePredict = await call(`${ENGINE}/infer/satellite`, { method: "POST", body: satelliteForm() });
   check(
-    "engine /predict returns contract fields",
+    "satellite engine returns damage GeoJSON",
     enginePredict.res.ok &&
-      typeof enginePredict.json?.prediction === "string" &&
-      typeof enginePredict.json?.confidence === "number" &&
-      enginePredict.json?.confidence > 0 &&
-      enginePredict.json?.confidence <= 1 &&
-      enginePredict.json?.geojson_polygon?.type === "Polygon" &&
+      enginePredict.json?.buildings_geojson?.type === "FeatureCollection" &&
+      enginePredict.json?.cells_geojson_r9?.type === "FeatureCollection" &&
       typeof enginePredict.json?.model_version === "string",
     `status=${enginePredict.res.status} body=${enginePredict.text.slice(0, 200)}`,
   );
   check(
-    "engine served the trained model (not the pre-model stub)",
-    enginePredict.json?.model_version && enginePredict.json.model_version !== "stub-v0",
+    "engine served the trained model (not the no-checkpoint stub)",
+    enginePredict.json?.model_version && enginePredict.json.model_version !== "stub-satellite-v0",
     `model_version=${enginePredict.json?.model_version}`,
   );
-
-  const badMagic = new FormData();
-  badMagic.append("hsi", new Blob([readFileSync(LIDAR_FIXTURE)]), "not-a-tiff.tif");
-  badMagic.append("lidar", new Blob([readFileSync(LIDAR_FIXTURE)]), "points.las");
-  const engineBad = await call(`${ENGINE}/predict`, { method: "POST", body: badMagic });
-  check("engine rejects a non-TIFF hsi with 400", engineBad.res.status === 400,
-    `status=${engineBad.res.status}`);
 
   section("3. auth: register / login / refresh / change-password / logout");
   const noAuth = await call(`${BACKEND}/assessments`);
@@ -241,15 +223,15 @@ async function run() {
     token,
     body: (() => {
       const form = new FormData();
-      form.append("hsi", new Blob([readFileSync(LIDAR_FIXTURE)]), "wrong.tif");
-      form.append("lidar", new Blob([readFileSync(LIDAR_FIXTURE)]), "points.las");
+      form.append("pre", new Blob([Buffer.from("not-an-image")]), "wrong.png");
+      form.append("post", new Blob([SAMPLE_PNG]), "post.png");
       return form;
     })(),
   });
-  check("upload rejects a non-TIFF hsi by magic bytes (400)", rejectedUpload.res.status === 400,
+  check("upload rejects invalid satellite image magic bytes (400)", rejectedUpload.res.status === 400,
     `status=${rejectedUpload.res.status} body=${rejectedUpload.text.slice(0, 160)}`);
 
-  const upload = await call(`${BACKEND}/upload`, { method: "POST", token, body: scanForm() });
+  const upload = await call(`${BACKEND}/upload`, { method: "POST", token, body: satelliteForm() });
   const created = upload.json ?? {};
   check("upload returns 201 with the created assessment",
     upload.res.status === 201 &&
@@ -260,8 +242,9 @@ async function run() {
       created.geojson_polygon?.type === "Polygon" &&
       !!created.links?.detail,
     `status=${upload.res.status} body=${upload.text.slice(0, 240)}`);
-  check("upload ran the trained engine, not the backend stub",
-    created.model_version && created.model_version !== "stub-v0",
+  check("upload ran the trained xBD model, not a no-checkpoint fallback",
+    created.model_version &&
+      created.model_version !== "stub-satellite-v0",
     `model_version=${created.model_version}`);
   check("upload state is analyzed (simulated chain) or chain_logged (real chain)",
     created.state === "analyzed" || created.state === "chain_logged",
@@ -285,10 +268,10 @@ async function run() {
   check("GET /assessments/:id returns the stored record + proof fields",
     detail.res.ok &&
       d.id === assessmentId &&
-      typeof d.hsiCid === "string" && d.hsiCid.length > 20 &&
-      typeof d.lidarCid === "string" &&
-      d.filename?.hsi && d.filename?.lidar &&
-      !!d.storage?.hsi && !!d.storage?.lidar &&
+      typeof d.preCid === "string" && d.preCid.length > 20 &&
+      typeof d.postCid === "string" &&
+      d.filename?.pre && d.filename?.post &&
+      !!d.storage?.pre && !!d.storage?.post &&
       typeof d.timestamps?.uploaded === "string",
     `status=${detail.res.status} body=${detail.text.slice(0, 200)}`);
 
@@ -297,17 +280,15 @@ async function run() {
     `status=${foreign.res.status}`);
 
   section("6. original-file downloads (owner-scoped)");
-  const hsiBytes = readFileSync(HSI_FIXTURE);
-  const download = await call(`${BACKEND}/files/${assessmentId}/hsi`, { token, raw: true });
-  check("GET /files/:id/hsi returns the original HSI bytes",
-    download.res.ok && download.bytes.equals(hsiBytes),
-    `status=${download.res.status} got=${download.bytes.length} want=${hsiBytes.length}`);
+  const downloadPre = await call(`${BACKEND}/files/${assessmentId}/pre`, { token, raw: true });
+  check("GET /files/:id/pre returns the original pre-disaster image",
+    downloadPre.res.ok && downloadPre.bytes.equals(SAMPLE_PNG),
+    `status=${downloadPre.res.status} got=${downloadPre.bytes.length} want=${SAMPLE_PNG.length}`);
 
-  const lidarBytes = readFileSync(LIDAR_FIXTURE);
-  const downloadLidar = await call(`${BACKEND}/files/${assessmentId}/lidar`, { token, raw: true });
-  check("GET /files/:id/lidar returns the original LiDAR bytes",
-    downloadLidar.res.ok && downloadLidar.bytes.equals(lidarBytes),
-    `status=${downloadLidar.res.status} got=${downloadLidar.bytes.length} want=${lidarBytes.length}`);
+  const downloadPost = await call(`${BACKEND}/files/${assessmentId}/post`, { token, raw: true });
+  check("GET /files/:id/post returns the original post-disaster image",
+    downloadPost.res.ok && downloadPost.bytes.equals(SAMPLE_PNG),
+    `status=${downloadPost.res.status} got=${downloadPost.bytes.length} want=${SAMPLE_PNG.length}`);
 
   const badKind = await call(`${BACKEND}/files/${assessmentId}/secrets`, { token });
   check("unknown file kind is rejected (400)", badKind.res.status === 400,
@@ -315,7 +296,7 @@ async function run() {
 
   // Regression: a malformed id used to reject inside mongoose and crash the
   // backend process (unhandled rejection), taking the API down entirely.
-  const malformed = await call(`${BACKEND}/files/zzz/hsi`, { token });
+  const malformed = await call(`${BACKEND}/files/zzz/pre`, { token });
   check("malformed file id is a 404, not a crash", malformed.res.status === 404,
     `status=${malformed.res.status}`);
 
@@ -348,16 +329,16 @@ async function run() {
   check("another user cannot read the assessment (404)", crossRead.res.status === 404,
     `status=${crossRead.res.status}`);
 
-  const crossDownload = await call(`${BACKEND}/files/${assessmentId}/hsi`, {
+  const crossDownload = await call(`${BACKEND}/files/${assessmentId}/pre`, {
     token: otherLogin.json?.token,
   });
   check("another user cannot download the original (404)", crossDownload.res.status === 404,
     `status=${crossDownload.res.status}`);
 
   section("7. chain verification");
-  const verify = await call(`${BACKEND}/chain/verify/${encodeURIComponent(d.hsiCid)}`, { token });
+  const verify = await call(`${BACKEND}/chain/verify/${encodeURIComponent(d.preCid)}`, { token });
   check("GET /chain/verify/:cid answers with the proof shape",
-    verify.res.ok && verify.json?.cid === d.hsiCid && typeof verify.json?.verified === "boolean",
+    verify.res.ok && verify.json?.cid === d.preCid && typeof verify.json?.verified === "boolean",
     `status=${verify.res.status} body=${verify.text.slice(0, 200)}`);
   check("proof state matches the stored record",
     verify.json?.verified === d.chainVerified && (verify.json?.txHash ?? null) === (d.txHash ?? null),

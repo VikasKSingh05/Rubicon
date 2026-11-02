@@ -10,8 +10,8 @@ import { pinBuffer } from "./ipfs.js";
 import { logAssessment } from "./chainService.js";
 
 export async function attachProof(assessment, files, prediction) {
-  const primaryA = files.pre || files.hsi;
-  const primaryB = files.post || files.lidar;
+  const primaryA = files.pre;
+  const primaryB = files.post;
   if (!primaryA || !primaryB) {
     throw new Error("proof requires two uploaded buffers");
   }
@@ -21,14 +21,9 @@ export async function attachProof(assessment, files, prediction) {
     pinBuffer(primaryB.buffer, primaryB.originalname),
   ]);
 
-  if (files.pre) {
-    assessment.preCid = pA.cid;
-    assessment.postCid = pB.cid;
-  }
-  assessment.hsiCid = pA.cid;
-  assessment.lidarCid = pB.cid;
-
-  const logged = await logAssessment({ hsiCid: pA.cid, lidarCid: pB.cid, prediction });
+  assessment.preCid = pA.cid;
+  assessment.postCid = pB.cid;
+  const logged = await logAssessment({ preCid: pA.cid, postCid: pB.cid, prediction });
   assessment.txHash = logged.txHash;
   assessment.chainVerified = logged.chainVerified;
   if (!logged.simulated) {

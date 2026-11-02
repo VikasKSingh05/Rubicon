@@ -13,13 +13,7 @@ function Row({ label, value }) {
 }
 
 function DownloadRow({ assessmentId, kind, filename }) {
-  const defaultLabels = {
-    pre: "Pre-Disaster Satellite",
-    post: "Post-Disaster Satellite",
-    hsi: "HSI data",
-    lidar: "LiDAR data",
-  };
-  const label = defaultLabels[kind] || kind.toUpperCase();
+  const label = kind === "pre" ? "Pre-Disaster Satellite Image" : "Post-Disaster Satellite Image";
   return (
     <button
       onClick={() => downloadBlob(`/files/${assessmentId}/${kind}`, filename || label)}
@@ -59,10 +53,8 @@ function ChainInfo({ a }) {
   if (!hasChain) return <p className="text-sm text-slate-500">Pending on-chain proof…</p>;
   return (
     <div>
-      {a.preCid && <Row label="Pre CID" value={a.preCid} />}
-      {a.postCid && <Row label="Post CID" value={a.postCid} />}
-      {!a.preCid && a.hsiCid && <Row label="HSI CID" value={a.hsiCid} />}
-      {!a.postCid && a.lidarCid && <Row label="LiDAR CID" value={a.lidarCid} />}
+      {(a.preCid || a.hsiCid) && <Row label="Input A CID" value={a.preCid || a.hsiCid} />}
+      {(a.postCid || a.lidarCid) && <Row label="Input B CID" value={a.postCid || a.lidarCid} />}
       {a.txHash && <Row label="Tx hash" value={`${a.txHash.slice(0, 12)}…`} />}
     </div>
   );
@@ -107,7 +99,7 @@ export default function DataPanel({ assessment, onReverify, reverifyPending }) {
         {a.timestamps?.chainLogged && (
           <Row label="Chain log" value={new Date(a.timestamps.chainLogged).toLocaleString()} />
         )}
-        {a.hsiCid && onReverify && (
+        {(a.preCid || a.hsiCid) && onReverify && (
           <button
             onClick={onReverify}
             disabled={reverifyPending}
@@ -124,17 +116,11 @@ export default function DataPanel({ assessment, onReverify, reverifyPending }) {
             Original files
           </h3>
           <div className="space-y-1.5">
-            {a.storage?.pre && (
-              <DownloadRow assessmentId={a.id} kind="pre" filename={a.filename?.pre} />
+            {(a.storage?.pre || a.storage?.hsi) && (
+              <DownloadRow assessmentId={a.id} kind="pre" filename={a.filename?.pre || a.filename?.hsi} />
             )}
-            {a.storage?.post && (
-              <DownloadRow assessmentId={a.id} kind="post" filename={a.filename?.post} />
-            )}
-            {a.storage?.hsi && (
-              <DownloadRow assessmentId={a.id} kind="hsi" filename={a.filename?.hsi} />
-            )}
-            {a.storage?.lidar && (
-              <DownloadRow assessmentId={a.id} kind="lidar" filename={a.filename?.lidar} />
+            {(a.storage?.post || a.storage?.lidar) && (
+              <DownloadRow assessmentId={a.id} kind="post" filename={a.filename?.post || a.filename?.lidar} />
             )}
           </div>
         </section>

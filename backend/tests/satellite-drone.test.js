@@ -133,6 +133,7 @@ test("GET /assessments/:id/verify returns cryptographic proof verification", asy
     prediction: "Severe Collapse",
     confidence: 0.91,
     hsiCid: "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco",
+    lidarCid: "QmLegacyInputB",
     txHash: "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
     chainVerified: false,
   });
@@ -143,6 +144,7 @@ test("GET /assessments/:id/verify returns cryptographic proof verification", asy
 
   assert.equal(res.status, 200);
   assert.equal(res.body.assessmentId, doc._id.toString());
-  assert.equal(res.body.cid, "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco");
+  assert.equal(res.body.preCid, "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco");
+  assert.equal(res.body.postCid, "QmLegacyInputB");
   assert.equal(res.body.txHash, doc.txHash);
 });

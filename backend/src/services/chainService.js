@@ -43,8 +43,8 @@ function fakeTxHash(seed) {
   return `0x${createHash("sha256").update(seed).digest("hex")}`;
 }
 
-export function simulatedLog({ hsiCid, lidarCid }) {
-  return { simulated: true, txHash: fakeTxHash(`${hsiCid}-${lidarCid}`), chainVerified: false };
+export function simulatedLog({ preCid, postCid }) {
+  return { simulated: true, txHash: fakeTxHash(`${preCid}-${postCid}`), chainVerified: false };
 }
 
 export function buildContract(deps = {}) {
@@ -58,13 +58,14 @@ export function buildContract(deps = {}) {
  * Throws when configured but the tx fails (real infra problem — never quietly
  * downgraded).
  */
-export async function logAssessment({ hsiCid, lidarCid, prediction }, deps = {}) {
+export async function logAssessment({ preCid, postCid, prediction }, deps = {}) {
   if (!chainConfigured()) {
     logger.warn("Amoy not configured — writing a simulated on-chain record");
-    return simulatedLog({ hsiCid, lidarCid });
+    return simulatedLog({ preCid, postCid });
   }
   const contract = buildContract(deps);
-  const tx = await contract.logAssessment(hsiCid, lidarCid, prediction);
+  // The deployed ledger ABI uses its original positional CID parameter names.
+  const tx = await contract.logAssessment(preCid, postCid, prediction);
   const receipt = await tx.wait(6);
   return { simulated: false, txHash: receipt.hash, chainVerified: true };
 }

@@ -47,10 +47,11 @@ export default function AssessmentPage() {
   }, [id]);
 
   const handleReverify = useCallback(async () => {
-    if (!assessment?.hsiCid || reverifyPending) return;
+    const cid = assessment?.preCid || assessment?.hsiCid;
+    if (!cid || reverifyPending) return;
     setReverifyPending(true);
     try {
-      const res = await api(`/chain/verify/${assessment.hsiCid}`);
+      const res = await api(`/chain/verify/${cid}`);
       if (res.assessmentId) {
         const fresh = await api(`/assessments/${id}`);
         setAssessment(fresh);
@@ -60,7 +61,7 @@ export default function AssessmentPage() {
     } finally {
       setReverifyPending(false);
     }
-  }, [assessment?.hsiCid, id, reverifyPending]);
+  }, [assessment?.preCid, assessment?.hsiCid, id, reverifyPending]);
 
   function handleInspectCell(cellId) {
     setSelectedCellId(cellId);
@@ -140,7 +141,7 @@ export default function AssessmentPage() {
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <DataPanel
               assessment={assessment}
-              onReverify={assessment.hsiCid ? handleReverify : null}
+              onReverify={assessment.preCid || assessment.hsiCid ? handleReverify : null}
               reverifyPending={reverifyPending}
             />
           </div>

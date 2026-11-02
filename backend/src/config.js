@@ -5,7 +5,6 @@ export const config = {
   mongoUri: process.env.MONGO_URI || "mongodb://localhost:27017/rubicon",
   jwtSecret: process.env.JWT_SECRET || "dev-secret-change-me",
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL || "15m",
-  aiEngineUrl: process.env.AI_ENGINE_URL || "http://localhost:8000",
   satEngineUrl: process.env.SAT_ENGINE_URL || "http://localhost:8002",
 
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB) || 100,

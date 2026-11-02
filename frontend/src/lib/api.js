@@ -87,7 +87,7 @@ export async function changePassword(currentPassword, newPassword) {
 
 export { API_BASE };
 
-/** Fetch a file download (e.g. /files/:id/hsi) and return a Blob URL. */
+/** Fetch a file download (e.g. /files/:id/pre) and return a Blob URL. */
 export async function downloadBlob(path, defaultName) {
   const headers = {};
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;

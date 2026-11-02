@@ -25,7 +25,7 @@ function multerErrorToResponse(err, res) {
     return res.status(413).json({ error: `file too large (max ${config.maxUploadMb}MB)` });
   }
   if (err?.message === "unsupported file type") {
-    return res.status(400).json({ error: "only image files (.png/.jpg/.tif) or point clouds (.las/.laz) are supported" });
+    return res.status(400).json({ error: "only PNG, JPEG, or TIFF satellite images are supported" });
   }
   return res.status(400).json({ error: err?.message || "upload failed" });
 }
@@ -52,12 +52,9 @@ const upload = multer({
 }).fields([
   { name: "pre", maxCount: 1 },
   { name: "post", maxCount: 1 },
-  { name: "hsi", maxCount: 1 },
-  { name: "lidar", maxCount: 1 },
 ]);
 
-// POST /upload — accepts multipart fields (pre + post for xBD, or hsi + lidar for legacy),
-// runs the real Siamese U-Net engine, stores evidence, and pins/proves the upload.
+// POST /upload — accepts an xBD pre/post image pair, stores evidence, and pins/proves it.
 router.post("/", requireAuth, (req, res) => {
   upload(req, res, async (err) => {
     try {
@@ -65,42 +62,20 @@ router.post("/", requireAuth, (req, res) => {
 
       const pre = req.files?.pre?.[0];
       const post = req.files?.post?.[0];
-      const hsi = req.files?.hsi?.[0];
-      const lidar = req.files?.lidar?.[0];
-
-      const isXbd = Boolean(pre && post);
-      const isLegacy = Boolean(hsi && lidar);
-
-      if (!isXbd && !isLegacy) {
-        return res.status(400).json({ error: "Please upload pre and post disaster images (or hsi + lidar)" });
+      if (!pre || !post) {
+        return res.status(400).json({ error: "Please upload pre- and post-disaster satellite images" });
       }
 
-      let files = {};
-      let filenameObj = {};
+      const preBuf = await readFile(pre.path);
+      const postBuf = await readFile(post.path);
+      const magicErr = validateMagic(preBuf, "pre") || validateMagic(postBuf, "post");
+      if (magicErr) return res.status(400).json({ error: magicErr });
 
-      if (isXbd) {
-        const preBuf = await readFile(pre.path);
-        const postBuf = await readFile(post.path);
-        const magicErr = validateMagic(preBuf, "pre") || validateMagic(postBuf, "post");
-        if (magicErr) return res.status(400).json({ error: magicErr });
-
-        files = {
-          pre: { buffer: preBuf, originalname: pre.originalname },
-          post: { buffer: postBuf, originalname: post.originalname },
-        };
-        filenameObj = { pre: pre.originalname, post: post.originalname };
-      } else {
-        const hsiBuf = await readFile(hsi.path);
-        const lidarBuf = await readFile(lidar.path);
-        const magicErr = validateMagic(hsiBuf, "hsi") || validateMagic(lidarBuf, "lidar");
-        if (magicErr) return res.status(400).json({ error: magicErr });
-
-        files = {
-          hsi: { buffer: hsiBuf, originalname: hsi.originalname },
-          lidar: { buffer: lidarBuf, originalname: lidar.originalname },
-        };
-        filenameObj = { hsi: hsi.originalname, lidar: lidar.originalname };
-      }
+      const files = {
+        pre: { buffer: preBuf, originalname: pre.originalname },
+        post: { buffer: postBuf, originalname: post.originalname },
+      };
+      const filenameObj = { pre: pre.originalname, post: post.originalname };
 
       const assessment = await Assessment.create({
         user: req.user.sub,

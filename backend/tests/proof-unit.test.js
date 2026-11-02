@@ -35,12 +35,12 @@ test("pinBuffer reflects offline mode without a Pinata JWT", async () => {
 
 test("chain layer reports not configured and simulates deterministically", async () => {
   assert.equal(chainConfigured(), false);
-  const sim = simulatedLog({ hsiCid: "QmA", lidarCid: "QmB" });
+  const sim = simulatedLog({ preCid: "QmA", postCid: "QmB" });
   assert.equal(sim.simulated, true);
   assert.equal(sim.chainVerified, false);
   assert.ok(sim.txHash.startsWith("0x"));
 
-  const logged = await logAssessment({ hsiCid: "QmA", lidarCid: "QmB", prediction: "Severe Collapse" });
+  const logged = await logAssessment({ preCid: "QmA", postCid: "QmB", prediction: "Destroyed" });
   assert.equal(logged.simulated, true);
   assert.equal(logged.txHash, sim.txHash, "simulated tx is deterministic per seed");
 });

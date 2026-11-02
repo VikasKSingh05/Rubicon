@@ -19,8 +19,13 @@ router.get(
     // 1) DB lookup (user-scoped, always authoritative for assessmentId/state).
     const doc = await Assessment.findOne({
       user: req.user.sub,
-      $or: [{ hsiCid: cid }, { lidarCid: cid }],
-    }).select("state hsiCid lidarCid txHash chainVerified");
+      $or: [
+        { preCid: cid },
+        { postCid: cid },
+        { hsiCid: cid },
+        { lidarCid: cid },
+      ],
+    }).select("state preCid postCid hsiCid lidarCid txHash chainVerified");
 
     const assessmentId = doc?._id?.toString() ?? null;
     const state = doc?.state ?? null;

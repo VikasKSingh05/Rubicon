@@ -55,7 +55,7 @@ router.post(
 
     const imgSha256 = createHash("sha256").update(req.file.buffer).digest("hex");
 
-    // Forward to ai-engine-satellite drone endpoint
+    // Forward to the shared AI engine's drone endpoint.
     let engineBody = null;
     try {
       const form = new FormData();

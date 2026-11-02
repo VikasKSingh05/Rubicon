@@ -9,30 +9,22 @@ const STEPS = [
   { key: "done", label: "Done" },
 ];
 
-const ACCEPT = {
-  hsi: [".tif", ".tiff", ".png", ".jpg", ".jpeg"],
-  lidar: [".las", ".laz", ".png", ".jpg", ".jpeg", ".tif", ".tiff"],
-};
+const ACCEPT = [".png", ".jpg", ".jpeg", ".tif", ".tiff"];
 
 const MAX_BYTES = 100 * 1024 * 1024;
 
-function fileError(file, kind) {
+function fileError(file) {
   if (!file) return null;
   const ext = `.${file.name.split(".").pop()?.toLowerCase()}`;
-  if (kind === "hsi" && ![".tif", ".tiff", ".png", ".jpg", ".jpeg"].includes(ext)) {
-    return `Only .tif, .tiff files are supported.`;
-  }
-  if (kind === "lidar" && ![".las", ".laz", ".png", ".jpg", ".jpeg", ".tif", ".tiff"].includes(ext)) {
-    return `Only .las, .laz files are supported.`;
-  }
+  if (!ACCEPT.includes(ext)) return "Only PNG, JPEG, or TIFF images are supported.";
   if (file.size > MAX_BYTES) return "File exceeds the 100 MB limit.";
   return null;
 }
 
-export function FileDropzone({ label, kind, file, error, onFile }) {
+export function FileDropzone({ label, file, error, onFile }) {
   const inputRef = useRef(null);
   const [dragging, setDragging] = useState(false);
-  const accept = ACCEPT[kind].join(",");
+  const accept = ACCEPT.join(",");
 
   function pick(f) {
     setDragging(false);
@@ -132,24 +124,24 @@ export function ProgressStepper({ activeStep }) {
 }
 
 export default function UploadModal({ onClose, onCreated }) {
-  const [hsi, setHsi] = useState(null);
-  const [lidar, setLidar] = useState(null);
+  const [pre, setPre] = useState(null);
+  const [post, setPost] = useState(null);
   const [phase, setPhase] = useState("idle"); // idle | in-progress | done | error
   const [activeStep, setActiveStep] = useState(0);
   const [error, setError] = useState(null);
 
   const reset = () => {
-    setHsi(null);
-    setLidar(null);
+    setPre(null);
+    setPost(null);
     setPhase("idle");
     setActiveStep(0);
     setError(null);
   };
 
-  const hsiFileError = fileError(hsi, "hsi");
-  const lidarFileError = fileError(lidar, "lidar");
+  const preFileError = fileError(pre);
+  const postFileError = fileError(post);
   const canSubmit =
-    hsi && lidar && !hsiFileError && !lidarFileError && phase !== "in-progress";
+    pre && post && !preFileError && !postFileError && phase !== "in-progress";
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -160,10 +152,8 @@ export default function UploadModal({ onClose, onCreated }) {
 
     try {
       const form = new FormData();
-      form.append("pre", hsi);
-      form.append("post", lidar);
-      form.append("hsi", hsi);
-      form.append("lidar", lidar);
+      form.append("pre", pre);
+      form.append("post", post);
       const data = await api("/upload", { method: "POST", body: form });
 
       setActiveStep(STEPS.length); // all steps complete server-side
@@ -211,18 +201,16 @@ export default function UploadModal({ onClose, onCreated }) {
           <form onSubmit={handleSubmit}>
             <div className="space-y-4">
               <FileDropzone
-                label="Hyperspectral / Pre-Disaster Optical Scan"
-                kind="hsi"
-                file={hsi}
-                error={phase === "error" || hsi ? hsiFileError : null}
-                onFile={setHsi}
+                label="Pre-Disaster Satellite Image"
+                file={pre}
+                error={phase === "error" || pre ? preFileError : null}
+                onFile={setPre}
               />
               <FileDropzone
-                label="LiDAR / Post-Disaster Optical Scan"
-                kind="lidar"
-                file={lidar}
-                error={phase === "error" || lidar ? lidarFileError : null}
-                onFile={setLidar}
+                label="Post-Disaster Satellite Image"
+                file={post}
+                error={phase === "error" || post ? postFileError : null}
+                onFile={setPost}
               />
             </div>
             {error && <p className="mt-3 text-sm text-severity-severe">{error}</p>}

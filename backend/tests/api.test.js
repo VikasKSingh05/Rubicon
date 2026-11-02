@@ -22,8 +22,8 @@ config.pinataJwt = "";
 config.amoyRpcUrl = "";
 config.deployerPrivateKey = "";
 config.contractAddress = "";
-// Force a fast, guaranteed-unreachable engine so uploads always take the stub path.
-config.aiEngineUrl = "http://127.0.0.1:65530";
+// Force a fast, guaranteed-unreachable engine so uploads always take the demo fallback.
+config.satEngineUrl = "http://127.0.0.1:65530";
 
 const EMAIL = "demo@rubicon.dev";
 const PASSWORD = "secret123";
@@ -104,19 +104,19 @@ function authHeader(token) {
 }
 
 // Magic-valid upload payloads (Phase 7 validates content, not just extension).
-const FAKE_HSI = Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), Buffer.from("fake-hsi")]);
-const FAKE_LIDAR = Buffer.concat([Buffer.from("LASF"), Buffer.from("fake-lidar")]);
+const FAKE_PRE = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from("fake-pre")]);
+const FAKE_POST = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from("fake-post")]);
 
-async function uploadFiles(token, hsiName = "scan.tiff", lidarName = "scan.las") {
+async function uploadFiles(token, preName = "pre.png", postName = "post.png") {
   return request(app)
     .post("/upload")
     .set(authHeader(token))
-    .attach("hsi", FAKE_HSI, hsiName)
-    .attach("lidar", FAKE_LIDAR, lidarName);
+    .attach("pre", FAKE_PRE, preName)
+    .attach("post", FAKE_POST, postName);
 }
 
 test("upload requires auth", async () => {
-  const res = await request(app).post("/upload").attach("hsi", Buffer.from("x"), "a.tiff");
+  const res = await request(app).post("/upload").attach("pre", Buffer.from("x"), "a.png");
   assert.equal(res.status, 401);
 });
 
@@ -125,7 +125,7 @@ test("upload rejects missing files", async () => {
   const res = await request(app)
     .post("/upload")
     .set(authHeader(token))
-    .attach("hsi", Buffer.from("x"), "a.tiff");
+    .attach("pre", Buffer.from("x"), "a.png");
   assert.equal(res.status, 400);
 });
 
@@ -134,12 +134,12 @@ test("upload rejects disallowed file types", async () => {
   const res = await request(app)
     .post("/upload")
     .set(authHeader(token))
-    .attach("hsi", Buffer.from("x"), "a.exe")
-    .attach("lidar", Buffer.from("y"), "b.las");
+    .attach("pre", Buffer.from("x"), "a.exe")
+    .attach("post", FAKE_POST, "b.png");
   assert.equal(res.status, 400);
 });
 
-test("upload returns the exact /predict contract shape", async () => {
+test("upload returns an xBD assessment contract", async () => {
   const token = await getToken();
   const res = await uploadFiles(token);
   assert.equal(res.status, 201);
@@ -157,7 +157,7 @@ test("upload returns the exact /predict contract shape", async () => {
   assert.deepEqual(Object.keys(res.body).sort(), keys.sort());
   assert.equal(res.body.state, "analyzed");
   assert.equal(res.body.geojson_polygon.type, "Polygon");
-  for (const cls of ["None", "Moderate", "Severe Collapse"]) {
+  for (const cls of ["No Damage", "Minor Damage", "Major Damage", "Destroyed"]) {
     assert.ok(cls in res.body.class_probs, `missing class ${cls}`);
   }
   assert.ok(res.body.links.detail.startsWith("/assessments/"));
@@ -190,8 +190,8 @@ test("assessment detail returns full document and chain fields exist", async () 
   assert.equal(detail.status, 200);
   assert.equal(detail.body.id, up.body.assessmentId);
   // Phase-5 fields present so no migration is needed later:
-  assert.ok("hsiCid" in detail.body);
-  assert.ok("lidarCid" in detail.body);
+  assert.ok(detail.body.preCid);
+  assert.ok(detail.body.postCid);
   assert.ok("txHash" in detail.body);
   assert.ok("chainVerified" in detail.body);
   assert.equal(detail.body.state, "analyzed");
@@ -199,12 +199,12 @@ test("assessment detail returns full document and chain fields exist", async () 
 
 test("upload content-addresses files as real CIDv0 and reports simulated chain status", async () => {
   const token = await getToken();
-  const res = await uploadFiles(token, "proof.tiff", "proof.las");
+  const res = await uploadFiles(token, "pre-proof.tiff", "post-proof.tiff");
   assert.equal(res.status, 201);
 
   const detail = await request(app).get(res.body.links.detail).set(authHeader(token));
-  assert.equal(detail.body.hsiCid, contentCid(FAKE_HSI));
-  assert.equal(detail.body.lidarCid, contentCid(FAKE_LIDAR));
+  assert.equal(detail.body.preCid, contentCid(FAKE_PRE));
+  assert.equal(detail.body.postCid, contentCid(FAKE_POST));
   // Offline proof: a deterministic fake tx, chain not yet verified.
   assert.equal(detail.body.chainVerified, false);
   assert.ok(detail.body.txHash.startsWith("0x"));
@@ -234,7 +234,7 @@ test("malformed assessment ids are answered as 404s (never a cast error or hung 
 
   // The file route used to run an unwrapped async handler, so a malformed id
   // rejected inside mongoose and killed the process instead of answering.
-  const file = await request(app).get("/files/zzz/hsi").set(authHeader(token));
+  const file = await request(app).get("/files/zzz/pre").set(authHeader(token));
   assert.equal(file.status, 404);
   assert.deepEqual(file.body, { error: "assessment not found" });
 
@@ -274,15 +274,14 @@ test("assessments list paginates with limit/offset and reports total", async () 
   assert.equal(second.body.assessments.length, 1);
 });
 
-test("upload accepts .laz LiDAR alongside .tiff HSI", async () => {
+test("upload no longer accepts the retired HSI/LiDAR multipart fields", async () => {
   const token = await getToken();
   const res = await request(app)
     .post("/upload")
     .set(authHeader(token))
-    .attach("hsi", FAKE_HSI, "scans.tiff")
-    .attach("lidar", FAKE_LIDAR, "scans.laz");
-  assert.equal(res.status, 201);
-  assert.equal(res.body.model_version, "stub-v0");
+    .attach("hsi", FAKE_PRE, "scan.tiff")
+    .attach("lidar", FAKE_POST, "scan.tiff");
+  assert.equal(res.status, 400);
 });
 
 test("upload rejects files whose content does not match the extension", async () => {
@@ -290,26 +289,26 @@ test("upload rejects files whose content does not match the extension", async ()
   const res = await request(app)
     .post("/upload")
     .set(authHeader(token))
-    .attach("hsi", Buffer.from("garbage bytes not a tiff"), "scan.tiff")
-    .attach("lidar", FAKE_LIDAR, "scan.las");
+    .attach("pre", Buffer.from("garbage bytes not a png"), "pre.png")
+    .attach("post", FAKE_POST, "post.png");
   assert.equal(res.status, 400);
-  assert.equal(res.body.error, "hsi file is not a valid TIFF");
+  assert.equal(res.body.error, "pre image must be a valid PNG, JPEG, or TIFF");
 });
 
 test("files endpoint streams the persisted originals to the owner", async () => {
   const token = await getToken();
   const up = await uploadFiles(token);
 
-  const hsi = await request(app).get(`/files/${up.body.assessmentId}/hsi`).set(authHeader(token));
-  assert.equal(hsi.status, 200);
-  assert.equal(hsi.type, "image/tiff");
-  assert.ok(hsi.body.equals(FAKE_HSI));
-  assert.ok(hsi.headers["content-disposition"].includes("scan.tiff"));
+  const pre = await request(app).get(`/files/${up.body.assessmentId}/pre`).set(authHeader(token));
+  assert.equal(pre.status, 200);
+  assert.equal(pre.type, "image/png");
+  assert.ok(pre.body.equals(FAKE_PRE));
+  assert.ok(pre.headers["content-disposition"].includes("pre.png"));
 
-  const lidar = await request(app).get(`/files/${up.body.assessmentId}/lidar`).set(authHeader(token));
-  assert.equal(lidar.status, 200);
-  assert.equal(lidar.type, "application/octet-stream");
-  assert.ok(lidar.body.equals(FAKE_LIDAR));
+  const post = await request(app).get(`/files/${up.body.assessmentId}/post`).set(authHeader(token));
+  assert.equal(post.status, 200);
+  assert.equal(post.type, "image/png");
+  assert.ok(post.body.equals(FAKE_POST));
 });
 
 test("files endpoint enforces ownership, valid kinds, and 404s", async () => {
@@ -317,17 +316,17 @@ test("files endpoint enforces ownership, valid kinds, and 404s", async () => {
   const up = await uploadFiles(token);
   const otherToken = await getToken("other@rubicon.dev", "secret456");
 
-  const other = await request(app).get(`/files/${up.body.assessmentId}/hsi`).set(authHeader(otherToken));
+  const other = await request(app).get(`/files/${up.body.assessmentId}/pre`).set(authHeader(otherToken));
   assert.equal(other.status, 404, "other users must not read files");
 
-  const anon = await request(app).get(`/files/${up.body.assessmentId}/hsi`);
+  const anon = await request(app).get(`/files/${up.body.assessmentId}/pre`);
   assert.equal(anon.status, 401);
 
   const badKind = await request(app).get(`/files/${up.body.assessmentId}/pointcloud`).set(authHeader(token));
   assert.equal(badKind.status, 400);
-  assert.equal(badKind.body.error, "kind must be 'hsi' or 'lidar'");
+  assert.equal(badKind.body.error, "kind must be 'pre' or 'post'");
 
-  const missing = await request(app).get(`/files/000000000000000000000000/hsi`).set(authHeader(token));
+  const missing = await request(app).get(`/files/000000000000000000000000/pre`).set(authHeader(token));
   assert.equal(missing.status, 404);
 });
 
@@ -343,9 +342,9 @@ test("chain verify stub reports the assessment for a known CID", async () => {
   const token = await getToken();
   const up = await uploadFiles(token);
   const detail = await request(app).get(up.body.links.detail).set(authHeader(token));
-  const res = await request(app).get(`/chain/verify/${detail.body.hsiCid}`).set(authHeader(token));
+  const res = await request(app).get(`/chain/verify/${detail.body.preCid}`).set(authHeader(token));
   assert.equal(res.status, 200);
-  assert.equal(res.body.cid, detail.body.hsiCid);
+  assert.equal(res.body.cid, detail.body.preCid);
   assert.equal(res.body.verified, false);
   // CIDs are content-derived, so any upload of the same file matches; the
   // stub must always report a concrete assessment once at least one exists.

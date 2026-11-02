@@ -33,12 +33,14 @@ const assessmentSchema = new mongoose.Schema(
     filename: {
       pre: { type: String, default: null },
       post: { type: String, default: null },
+      // Retained to read existing records created before the xBD-only upload flow.
       hsi: { type: String, default: null },
       lidar: { type: String, default: null },
     },
     storage: {
       pre: { type: String, default: null },
       post: { type: String, default: null },
+      // Retained to read existing records created before the xBD-only upload flow.
       hsi: { type: String, default: null },
       lidar: { type: String, default: null },
     },
@@ -56,6 +58,7 @@ const assessmentSchema = new mongoose.Schema(
     error: { type: String, default: null },
     preCid: { type: String, default: null },
     postCid: { type: String, default: null },
+    // Historical CID aliases retained for already-persisted assessments.
     hsiCid: { type: String, default: null },
     lidarCid: { type: String, default: null },
     txHash: { type: String, default: null },

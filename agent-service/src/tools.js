@@ -137,7 +137,7 @@ async function getAssessment(input, opts) {
     `Assessment ${a.id}: ${a.severity} "${a.prediction}"`,
     `confidence ${Number(a.confidence).toFixed(3)}`,
     `state ${a.state}`,
-    a.hsiCid ? `hsiCid ${a.hsiCid}` : "hsiCid not set",
+    (a.preCid || a.hsiCid) ? `pre-image CID ${a.preCid || a.hsiCid}` : "pre-image CID not set",
     `chainVerified ${a.chainVerified}`,
   ].join("\n");
   return { ok: true, summary, data: a };

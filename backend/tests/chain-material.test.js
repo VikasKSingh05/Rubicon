@@ -72,7 +72,7 @@ test("chainConfigured is true when all three params are set", () => {
 test("logAssessment writes a real record via the contract and reports chainVerified", async () => {
   const contract = fakeContract();
   const logged = await logAssessment(
-    { hsiCid: "QmA", lidarCid: "QmB", prediction: "Severe Collapse" },
+    { preCid: "QmA", postCid: "QmB", prediction: "Destroyed" },
     { contract },
   );
   assert.equal(logged.simulated, false);
@@ -83,7 +83,7 @@ test("logAssessment writes a real record via the contract and reports chainVerif
 test("logAssessment propagates a failing transaction (no silent downgrade)", async () => {
   const contract = fakeContract({ failLog: true });
   await assert.rejects(
-    logAssessment({ hsiCid: "QmA", lidarCid: "QmB", prediction: "None" }, { contract }),
+    logAssessment({ preCid: "QmA", postCid: "QmB", prediction: "No Damage" }, { contract }),
     /revert/,
   );
 });

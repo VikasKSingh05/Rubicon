@@ -44,7 +44,7 @@ export async function runFallbackAgent(opts) {
     if (!newest) return { answer: "I have no assessments yet, so there is nothing to verify on-chain.", toolCalls };
 
     const detail = await run("get_assessment", { id: newest.id });
-    const cid = detail.ok && detail.data.hsiCid;
+    const cid = detail.ok && (detail.data.preCid || detail.data.hsiCid);
     if (!cid) {
       return {
         answer: `The most recent assessment (${shortId(newest.id)}) has no IPFS CID recorded yet.`,

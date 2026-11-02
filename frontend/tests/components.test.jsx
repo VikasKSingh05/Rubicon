@@ -91,18 +91,16 @@ describe("UploadModal", () => {
   it("rejects unsupported file types before submitting", async () => {
     render(<UploadModal onClose={() => {}} onCreated={() => {}} />);
 
-    const inputs = screen.getAllByRole("button").filter((b) => b.getAttribute("aria-label") === "Choose Hyperspectral (HSI) file");
-    const dropzones = screen.getAllByLabelText(/Choose Hyperspectral/i);
-    expect(dropzones.length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Choose Pre-Disaster Satellite Image file")).toBeInTheDocument();
 
-    const hsiInput = document.querySelectorAll('input[type="file"]')[0];
-    fireEvent.change(hsiInput, {
+    const preInput = document.querySelectorAll('input[type="file"]')[0];
+    fireEvent.change(preInput, {
       target: {
         files: [new File(["x"], "photo.exe", { type: "application/octet-stream" })],
       },
     });
 
-    expect(await screen.findByText(/Only .tif, .tiff files are supported/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Only PNG, JPEG, or TIFF images are supported/i)).toBeInTheDocument();
     expect(screen.getByText("Run Assessment")).toBeDisabled();
   });
 
@@ -119,10 +117,10 @@ describe("UploadModal", () => {
 
     const inputs = document.querySelectorAll('input[type="file"]');
     fireEvent.change(inputs[0], {
-      target: { files: [new File(["hsi"], "scan.tiff", { type: "image/tiff" })] },
+      target: { files: [new File(["pre"], "before.tiff", { type: "image/tiff" })] },
     });
     fireEvent.change(inputs[1], {
-      target: { files: [new File(["lidar"], "scan.laz", { type: "application/octet-stream" })] },
+      target: { files: [new File(["post"], "after.png", { type: "image/png" })] },
     });
 
     const submit = screen.getByText("Run Assessment");
@@ -141,8 +139,10 @@ describe("UploadModal", () => {
     const expected = api.mock.calls[0][1].body;
     expect(api.mock.calls[0][0]).toBe("/upload");
     expect(expected instanceof FormData).toBe(true);
-    expect(expected.get("hsi").name).toBe("scan.tiff");
-    expect(expected.get("lidar").name).toBe("scan.laz");
+    expect(expected.get("pre").name).toBe("before.tiff");
+    expect(expected.get("post").name).toBe("after.png");
+    expect(expected.has("hsi")).toBe(false);
+    expect(expected.has("lidar")).toBe(false);
   });
 
   it("shows server errors and blocks resubmission", async () => {
@@ -151,10 +151,10 @@ describe("UploadModal", () => {
 
     const inputs = document.querySelectorAll('input[type="file"]');
     fireEvent.change(inputs[0], {
-      target: { files: [new File(["hsi"], "scan.tiff", { type: "image/tiff" })] },
+      target: { files: [new File(["pre"], "before.tiff", { type: "image/tiff" })] },
     });
     fireEvent.change(inputs[1], {
-      target: { files: [new File(["lidar"], "scan.las", { type: "application/octet-stream" })] },
+      target: { files: [new File(["post"], "after.tiff", { type: "image/tiff" })] },
     });
 
     const submit = screen.getByText("Run Assessment");
@@ -266,7 +266,7 @@ describe("AssessmentPage", () => {
   });
 
   it("shows download links for persisted originals and re-verifies on chain", async () => {
-    const fresh = asst({ id: "a1", hsiCid: "QmHsi1", lidarCid: "QmLid1", chainVerified: false });
+    const fresh = asst({ id: "a1", preCid: "QmPre1", postCid: "QmPost1", chainVerified: false });
     api.mockResolvedValue(fresh);
     render(
       <AuthProvider>
@@ -278,10 +278,11 @@ describe("AssessmentPage", () => {
       </AuthProvider>
     );
 
-    expect((await screen.findAllByText(/HSI/i)).length).toBeGreaterThan(0);
-    expect(screen.getByText(/LiDAR/i)).toBeInTheDocument();
+    expect(await screen.findByText("Input A CID")).toBeInTheDocument();
+    expect(screen.getByText("Input B CID")).toBeInTheDocument();
+    expect(screen.queryByText(/HSI|LiDAR/i)).not.toBeInTheDocument();
 
-    api.mockResolvedValue({ cid: "QmHsi1", verified: true, assessmentId: "a1", state: "chain_logged", txHash: "0xtx" });
+    api.mockResolvedValue({ cid: "QmPre1", verified: true, assessmentId: "a1", state: "chain_logged", txHash: "0xtx" });
     api.mockResolvedValueOnce(fresh);
     fireEvent.click(screen.getByText("Re-verify on chain"));
 

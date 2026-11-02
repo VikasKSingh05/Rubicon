@@ -160,15 +160,17 @@ router.get(
     const doc = await Assessment.findOne({ _id: id, user: req.user.sub });
     if (!doc) return res.status(404).json({ error: "assessment not found" });
 
+    const preCid = doc.preCid || doc.hsiCid;
+    const postCid = doc.postCid || doc.lidarCid;
     let onChainProof = null;
-    if (doc.hsiCid) {
-      onChainProof = await verifyOnChain(doc.hsiCid);
+    if (preCid) {
+      onChainProof = await verifyOnChain(preCid);
     }
 
     return res.json({
       assessmentId: doc._id.toString(),
-      cid: doc.hsiCid,
-      lidarCid: doc.lidarCid,
+      preCid,
+      postCid,
       txHash: onChainProof?.txHash || doc.txHash,
       chainVerified: Boolean(onChainProof || doc.chainVerified),
       state: doc.state,
