@@ -1,1 +1,0 @@
-"""Model training package (CLI entry via `python -m src.training.train`)."""

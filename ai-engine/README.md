@@ -1,9 +1,8 @@
 # Rubicon AI Engine — xBD Dual-Task Siamese U-Net
 
-This part of Rubicon contains the xBD Siamese U-Net for automated post-disaster
-building damage assessment from pre- and post-disaster optical imagery. It is
-the satellite model; the repository's HSI/LiDAR Mamba-Transformer pipeline is
-a separate model and uses separate artifacts.
+This part of Rubicon contains the xBD Siamese U-Net for building localization
+and damage assessment from paired pre- and post-disaster optical satellite
+imagery. The same FastAPI service also provides high-resolution drone triage.
 
 ## 🏗️ Model Architecture
 
@@ -56,12 +55,10 @@ ai-engine/
 │   │   └── hardware.py       # Hardware auto-detection (MPS/CUDA/CPU/RAM)
 │   ├── training/
 │   │   └── train.py          # Training loop with AMP, checkpointing & logging
-│   └── serve.py              # FastAPI satellite app, including POST /infer/satellite
-├── src/                      # Separate legacy Houston HSI/LiDAR experiment (/predict)
+│   └── serve.py              # FastAPI app: POST /infer/satellite and /infer/drone
 ├── scripts/
 │   ├── download_xbd.py       # xBD dataset access guide & synthetic generator
 │   ├── eda_xbd.py            # Comprehensive xBD Exploratory Data Analysis
-│   └── tune_hyperparams.py   # Hyperparameter tuning search for Siamese U-Net
 ├── notebooks/
 │   └── eda.ipynb             # Interactive Jupyter EDA notebook with visualizations
 └── tests/
@@ -107,23 +104,16 @@ python scripts/eda_xbd.py --synthetic
 jupyter lab notebooks/eda.ipynb
 ```
 
-### 3. Hyperparameter Tuning
-```bash
-# Fast dry-run
-python scripts/tune_hyperparams.py --synthetic --trials 5 --dry-run
-```
-
-### 4. Run Tests
+### 3. Run Tests
 ```bash
 pytest tests/test_xbd_data.py
 ```
 
-### 5. Start Inference Server
+### 4. Start Inference Server
 ```bash
 python -m uvicorn ai_engine.serve:app --host 127.0.0.1 --port 8002
 ```
 - Health Check: `GET http://localhost:8002/health` (`model_loaded` should be `true`)
 - Satellite API: `POST http://localhost:8002/infer/satellite` (multipart `pre` and `post`)
 
-The separate legacy HSI/LiDAR app is served from `src.inference` on port 8000.
-It is not the xBD Siamese U-Net and has independent model artifacts.
+The xBD and drone inference endpoints run from `ai_engine.serve` on port 8002.

@@ -1,11 +1,4 @@
-"""Rubicon ai-engine satellite inference endpoints.
-
-Adds to the existing FastAPI app (src/inference.py):
-  POST /infer/satellite  — accepts pre + post image pair, returns GeoJSON damage maps
-
-This module is imported by src/inference.py (or served standalone) and preserves
-the legacy /predict endpoint unchanged.
-"""
+"""FastAPI endpoints for xBD satellite assessment and drone triage."""
 from __future__ import annotations
 
 import json
@@ -25,7 +18,7 @@ from ai_engine.model.drone_serving import analyze_drone_image
 
 import torch
 
-app = FastAPI(title="Rubicon AI Engine — Satellite Triage", version="2.0.0")
+app = FastAPI(title="Rubicon xBD AI Engine", version="3.0.0")
 
 sat_logger = logging.getLogger("rubicon.sat-engine")
 
@@ -85,7 +78,7 @@ def health():
     runtime = get_sat_runtime()
     body = {
         "status": "ok",
-        "service": "ai-engine-satellite",
+        "service": "ai-engine",
         "model_loaded": runtime is not None,
     }
     if _sat_runtime_error:
