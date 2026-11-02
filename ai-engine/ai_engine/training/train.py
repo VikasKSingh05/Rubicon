@@ -40,7 +40,7 @@ from ..data.synthetic import generate_synthetic_dataset
 from ..data.dataset import XBDDataset, get_weighted_sampler, compute_norm_stats
 from ..model.siamese_unet import SiameseUNet
 from ..model.losses import RubiconLoss
-from ..model.metrics import XView2Metrics
+from ..model.metrics import XView2Metrics, decode_damage_logits
 from ..model.hardware import detect_hardware, HardwareProfile
 from ..model.checkpoint import DAMAGE_CLASS_NAMES, save_checkpoint
 
@@ -186,7 +186,7 @@ def _val_epoch(
 
             # Metrics update
             loc_prob = torch.sigmoid(loc_logits).cpu().numpy()
-            dmg_pred = dmg_logits.argmax(dim=1).cpu().numpy()
+            dmg_pred = decode_damage_logits(dmg_logits).cpu().numpy()
             loc_np = loc_t.cpu().numpy()
             dmg_np = dmg_t.cpu().numpy()
 

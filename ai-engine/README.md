@@ -13,15 +13,27 @@ The architecture implements a **Dual-Task Siamese U-Net** based on the research 
    - $F_{\text{post}} = \text{Encoder}(I_{\text{post}})$
 2. **Feature Fusion Layer**: Fuses pre and post feature maps via concatenation and absolute difference:
    - $F_{\text{fused}} = [F_{\text{pre}} \,\|\, F_{\text{post}} \,\|\, |F_{\text{post}} - F_{\text{pre}}|]$
-3. **Dual-Task Decoders**:
-   - **Localization Decoder**: Predicts building footprints (Binary Cross-Entropy + Dice Loss).
-   - **Classification Decoder**: Predicts five pixel classes (weighted Cross-Entropy + Focal Loss):
-     - `0: Background`
-     - `1: No damage`
-     - `2: Minor damage`
-     - `3: Major damage`
-     - `4: Destroyed`
+3. **Shared U-Net Decoder and Two Task Heads**:
+   - **Localization Head**: Predicts building footprints (Binary Cross-Entropy + Dice Loss).
+   - **Damage Head**: Predicts four damage classes only on ground-truth building pixels; background is ignored by this loss and handled by localization:
+     - `No damage`
+     - `Minor damage`
+     - `Major damage`
+     - `Destroyed`
 4. **Polygon Aggregator**: Masks classification output with predicted building footprints and aggregates per-building polygon damage confidence distributions.
+
+The root `train.py` uses normalized inverse-square-root weights computed from
+the selected real training tiles' damage-pixel frequencies (capped at 10). It
+shuffles tiles without weighted oversampling. Validation always uses the full
+event-disjoint split unless an explicit `--max-val` smoke-test cap is requested;
+each epoch logs localization F1, per-class damage precision/recall/F1, and
+predicted- and ground-truth-building damage histograms. A class above 90% of
+predicted building pixels after epoch 2 emits a warning but does not stop
+training. The local 6 GB profile uses batch size 2 with gradient accumulation
+2 (effective batch size 4).
+
+The actual six-epoch real-xBD v3 run and its full validation metrics are
+documented in the [mentor training report](../docs/xbd-v3-training-report.md).
 
 ---
 

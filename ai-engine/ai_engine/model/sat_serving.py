@@ -24,6 +24,7 @@ from .checkpoint import (
     load_checkpoint,
     norm_stats_from_checkpoint,
 )
+from .metrics import decode_damage_logits
 
 
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(1, 1, 3)
@@ -101,7 +102,7 @@ def load_siamese_runtime(model_dir: str | Path) -> dict:
     cp_path = Path(model_dir) / "siamese_unet.pt"
     if not cp_path.exists():
         raise FileNotFoundError(cp_path)
-    cp = load_checkpoint(cp_path, map_location="cpu", expected_num_classes=5)
+    cp = load_checkpoint(cp_path, map_location="cpu")
     model = build_model_from_checkpoint(cp, device="cpu")
     return {"model": model, "checkpoint": cp}
 
@@ -167,8 +168,12 @@ def infer_satellite(
         loc_logits, dmg_logits = model(pre_t, post_t)
 
     loc_prob = torch.sigmoid(loc_logits)[0, 0].cpu().numpy()   # (H, W)
-    dmg_pred = dmg_logits[0].argmax(dim=0).cpu().numpy()        # (H, W), values 0-4
-    dmg_conf = torch.softmax(dmg_logits[0], dim=0).max(dim=0).values.cpu().numpy()
+    damage_logits = dmg_logits[:, 1:5] if dmg_logits.shape[1] == 5 else dmg_logits
+    dmg_pred = decode_damage_logits(dmg_logits)[0].cpu().numpy()
+    dmg_conf = torch.softmax(damage_logits[0], dim=0).max(dim=0).values.cpu().numpy()
+    predicted_building_mask = loc_prob > 0.5
+    dmg_pred[~predicted_building_mask] = 0
+    dmg_conf[~predicted_building_mask] = 0.0
 
     # Resize outputs back to original resolution (for pixel-accurate reporting)
     if (loc_prob.shape[0] != H_orig or loc_prob.shape[1] != W_orig):
@@ -204,7 +209,7 @@ def infer_satellite(
         "post_sha256": post_sha256,
         "buildings_geojson": buildings_fc,
         "model_version": checkpoint.get("model_version", "siamese_unet-v1"),
-        "damage_classes": checkpoint.get("damage_classes", DAMAGE_CLASSES),
+        "damage_classes": DAMAGE_CLASSES,
         "exec_ms": exec_ms,
     }
 

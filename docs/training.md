@@ -7,7 +7,7 @@ overridable with `--config`:
 
 | Profile | When selected | Encoder | Crop | Batch | Accum | AMP |
 | :--- | :--- | :--- | ---: | ---: | ---: | :--- |
-| `local_6gb` | CUDA GPU with < 14 GB VRAM (RTX 3050) | `resnet34` | 512 | 2 | 4 | fp16 |
+| `local_6gb` | CUDA GPU with < 14 GB VRAM (RTX 3050) | `resnet34` | 512 | 2 | 2 | fp16 |
 | `kaggle_16gb` | CUDA GPU with >= 14 GB VRAM | `resnet34` | 512 | 8 | 1 | fp16 |
 | `cpu_fallback` | No CUDA | `resnet18` | 256 | 2 | 2 | off |
 
@@ -29,8 +29,8 @@ notebook is `ai-engine/notebooks/kaggle_xbd_training.ipynb`.
   label JSON files are required. The trainer reads `train/`; it does not train
   on `hold/`.
 - Splits are event-disjoint; see `docs/data.md` for the exact events and counts.
-- Normalisation statistics are fitted on training tiles only and stored in the
-  checkpoint.
+- Normalisation statistics are fitted on a deterministic sample of training
+  tiles only and stored in the checkpoint.
 - Masks are cached under `data/xbd_cache/` (override with `--cache-dir`).
 - `hold/` contains tile-level holdout data from events also found in `train/`.
   The primary generalization metric is therefore the event-disjoint validation
@@ -38,6 +38,25 @@ notebook is `ai-engine/notebooks/kaggle_xbd_training.ipynb`.
   reported separately.
 
 ## 3. Training
+
+The current root training CLI uses a **4-channel damage head** (no-damage,
+minor-damage, major-damage, destroyed). Damage loss is computed only where
+ground truth identifies a building (xBD target IDs 1-4); background pixels are
+ignored by that head and supervised by the localization loss. Per-class
+weights are computed from pixel counts in the selected real training tiles as
+normalized inverse-square-root frequencies, capped at 10. Training tiles are
+shuffled without weighted oversampling, so strong sampling and strong weights
+are not stacked. Validation remains the entire event-disjoint split when
+training data is subsetted. Each epoch logs localization F1, per-class damage
+precision/recall/F1, and
+predicted- and ground-truth-building damage histograms. A class exceeding 90%
+of predicted building pixels after epoch 2 triggers a warning only; this
+collapse check never stops training. Validation-score patience remains a
+separate early-stopping mechanism.
+
+The completed [xbd-v3 mentor report](./xbd-v3-training-report.md) documents
+the actual six-epoch run, architecture, dataset split, hyperparameters,
+per-epoch metrics, full validation results, and limitations.
 
 ### Windows PowerShell (local dataset)
 
@@ -68,6 +87,21 @@ record that choice in your report. A missing or invalid dataset path now stops
 the run instead of silently training on synthetic data. A smoke run using
 `--subset` or `--max-val` is useful for checking the pipeline, but is not a
 full-data result.
+
+For the six-epoch 30%-training subset run, preserving the full event-disjoint
+validation set and writing to a new artifact directory:
+
+```powershell
+python train.py --xbd-root $XbdRoot --config auto --epochs 6 --subset 0.3 `
+  --output-dir data/models/xbd-v3 --log-dir runs/xbd-v3
+python eval.py --xbd-root $XbdRoot --checkpoint data/models/xbd-v3/checkpoint_best.pt `
+  --split val --output-dir data/models/xbd-v3/eval-val
+```
+
+The evaluator reports per-class F1, the 4x4 confusion matrix on ground-truth
+building pixels, and the predicted-class histogram/percentages inside the
+localization head's predicted building mask. Use the actual tile count printed
+by the run; do not cap validation for this comparison.
 
 The run writes `data/models/xbd/training_metrics.json`, which records the
 dataset path and mode, model/parameter counts, hardware profile,

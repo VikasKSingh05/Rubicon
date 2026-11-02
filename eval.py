@@ -20,7 +20,11 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from ai_engine.model.metrics import XView2Metrics, DAMAGE_CLASS_NAMES
+from ai_engine.model.metrics import (
+    DAMAGE_CLASS_NAMES,
+    XView2Metrics,
+    decode_damage_logits,
+)
 from ai_engine.model.hardware import detect_hardware
 from ai_engine.model.checkpoint import (
     build_model_from_checkpoint,
@@ -139,10 +143,11 @@ def evaluate():
     device = torch.device(profile.device)
 
     print(f"\n[INFO] Loading checkpoint from '{ckpt_path.resolve()}'...")
-    checkpoint = load_checkpoint(ckpt_path, map_location=device, expected_num_classes=5)
+    checkpoint = load_checkpoint(ckpt_path, map_location=device)
     cfg = checkpoint.get("config", {})
     encoder_name = checkpoint.get("encoder_name", cfg.get("encoder", "resnet34"))
     model_version = checkpoint.get("model_version", "siamese_unet-v1")
+    damage_head_num_classes = int(checkpoint.get("num_classes", 5))
 
     model = build_model_from_checkpoint(checkpoint, device=device)
     norm_mean, norm_std = norm_stats_from_checkpoint(checkpoint)
@@ -191,6 +196,10 @@ def evaluate():
     if args.split == "val":
         print(f"[INFO] Evaluating on {len(eval_manifest)} event-disjoint validation tiles "
               f"({', '.join(eval_events)})...")
+        print(
+            "[INFO] Damage F1 uses ground-truth building pixels only; "
+            "damage predictions are argmax over classes 1-4."
+        )
         for warning in split_meta.get("warnings", []):
             print(f"[WARN] {warning}")
     else:
@@ -215,7 +224,7 @@ def evaluate():
             loc_logits, dmg_logits = model(pre, post)
 
             loc_probs = torch.sigmoid(loc_logits).cpu().numpy()
-            dmg_preds = torch.argmax(dmg_logits, dim=1).cpu().numpy()
+            dmg_preds = decode_damage_logits(dmg_logits).cpu().numpy()
 
             loc_gt = loc_mask.cpu().numpy()
             dmg_gt = dmg_mask.cpu().numpy()
@@ -235,7 +244,7 @@ def evaluate():
                     overlay_candidates.append({
                         "tile": tile_info,
                         "pred_loc": loc_probs[i, 0],
-                        "pred_dmg": dmg_preds[i],
+                        "pred_dmg": np.where(loc_probs[i, 0] > 0.5, dmg_preds[i], 0),
                         "gt_loc": loc_gt[i, 0],
                         "gt_dmg": dmg_gt[i],
                     })
@@ -249,9 +258,29 @@ def evaluate():
     print(f"  Official xView2 Score:       {metrics['xview2_score']:.4f}")
     print(f"  Localization F1:             {metrics['loc_f1']:.4f}")
     print(f"  Damage F1 (Harmonic Mean):   {metrics['damage_f1_harmonic']:.4f}")
-    print("  Per-Class Damage F1:")
+    print(f"  Damage F1 (Macro Average):   {metrics['damage_f1_macro']:.4f}")
+    print("  Per-Class Damage Metrics (ground-truth building pixels):")
     for cls_name, f1_val in metrics["damage_f1_classes"].items():
-        print(f"    - {cls_name:<16}: {f1_val:.4f}")
+        gt_count = metrics["damage_ground_truth_class_histogram"][cls_name]
+        print(
+            f"    - {cls_name:<16}: "
+            f"P={metrics['damage_precision_classes'][cls_name]:.4f} "
+            f"R={metrics['damage_recall_classes'][cls_name]:.4f} "
+            f"F1={f1_val:.4f} GT pixels={gt_count:,}"
+        )
+    print("  Confusion Matrix (rows=true, columns=predicted; classes 1-4):")
+    for row in metrics["confusion_matrix"]:
+        print(f"    {row}")
+    print("  Predicted class histogram inside predicted buildings:")
+    for cls_name, count in metrics["predicted_building_class_histogram"].items():
+        fraction = metrics["predicted_building_class_histogram_pct"][cls_name]
+        print(f"    - {cls_name:<16}: {count} ({fraction:.2f}%)")
+    print(f"    Total predicted building pixels: {metrics['predicted_building_pixels']}")
+    print("  Ground-truth building class histogram:")
+    for cls_name, count in metrics["damage_ground_truth_class_histogram"].items():
+        fraction = metrics["damage_ground_truth_class_histogram_pct"][cls_name]
+        print(f"    - {cls_name:<16}: {count} ({fraction:.2f}%)")
+    print(f"    Total ground-truth building pixels: {metrics['ground_truth_building_pixels']}")
     print("=" * 65)
 
     # 5. Save metrics JSON
@@ -261,7 +290,10 @@ def evaluate():
         "checkpoint_hash": checkpoint.get("state_dict_hash"),
         "model_version": model_version,
         "encoder": encoder_name,
-        "class_names": checkpoint.get("damage_classes", DAMAGE_CLASS_NAMES),
+        "damage_head_num_classes": damage_head_num_classes,
+        "class_names": DAMAGE_CLASS_NAMES,
+        "damage_f1_scope": "ground_truth_building_pixels",
+        "damage_macro_f1_scope": "unweighted_mean_of_four_damage_class_f1_scores",
         "data_mode": "synthetic" if args.synthetic else "real_xbd",
         "evaluation_split": args.split,
         "evaluation_events": eval_events,

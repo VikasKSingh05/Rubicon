@@ -6,7 +6,7 @@ Architecture specification:
 - U-Net decoder with skip connections progressive upsampling to full image resolution.
 - Two task heads:
   (a) Building localization head: 1 channel, predicts footprint presence
-  (b) Damage classification head: 5 channels (0: bg, 1: no-damage, 2: minor, 3: major, 4: destroyed)
+  (b) Damage classification head: 4 building-only channels (no-damage, minor, major, destroyed)
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class SiameseUNet(nn.Module):
         self,
         encoder_name: str = "resnet34",
         encoder_weights: str | None = "imagenet",
-        num_classes: int = 5,
+        num_classes: int = 4,
         decoder_channels: tuple[int, ...] = (256, 128, 64, 32),
     ):
         super().__init__()
@@ -104,7 +104,7 @@ class SiameseUNet(nn.Module):
             nn.Conv2d(16, 1, kernel_size=1),
         )
 
-        # Head 2: Damage classification (num_classes channels, 5 by default)
+        # Head 2: Four-way damage classification over building pixels.
         self.dmg_head = nn.Sequential(
             nn.Conv2d(32, 16, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(16),
@@ -126,7 +126,7 @@ class SiameseUNet(nn.Module):
         Returns:
             (loc_logits, dmg_logits):
             - loc_logits: Tensor of shape (B, 1, H, W)
-            - dmg_logits: Tensor of shape (B, 5, H, W)
+            - dmg_logits: Tensor of shape (B, num_classes, H, W)
         """
         # 1. Shared encoder feature extraction
         feats_pre = self.encoder(pre)

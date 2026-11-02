@@ -2,7 +2,7 @@
 
 Formula:
     Localization loss: BCE + Dice
-    Damage loss:       class-weighted CrossEntropy + Focal (gamma=2.0)
+    Damage loss:       building-only 4-way weighted CrossEntropy + Focal (gamma=2.0)
     Total loss:        0.4 * loc_loss + 0.6 * dmg_loss
 """
 from __future__ import annotations
@@ -53,16 +53,18 @@ class FocalLoss(nn.Module):
         self.register_buffer("weight", weight)  # None is allowed
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        # Per-pixel cross entropy, no reduction; ignored pixels give 0 loss
+        # Compute p_t from unweighted cross entropy; class alpha must not alter p_t.
         ce_loss = F.cross_entropy(
             logits,
             targets,
-            weight=self.weight,
             reduction="none",
             ignore_index=self.ignore_index,
         )
         pt = torch.exp(-ce_loss)
         focal_loss = ((1.0 - pt) ** self.gamma) * ce_loss
+        if self.weight is not None:
+            class_indices = targets.clamp(min=0, max=self.weight.numel() - 1)
+            focal_loss = focal_loss * self.weight[class_indices]
 
         if self.reduction == "mean":
             valid = (targets != self.ignore_index).sum().clamp(min=1)
@@ -99,8 +101,7 @@ class RubiconLoss(nn.Module):
             else:
                 weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
         else:
-            # Default: background downweighted, damaged classes boosted
-            weights_tensor = torch.tensor([0.2, 1.0, 2.0, 2.5, 3.0], dtype=torch.float32)
+            weights_tensor = torch.ones(4, dtype=torch.float32)
 
         # Buffers move with criterion.to(device); do NOT store weights as plain attributes
         self.register_buffer("class_weights", weights_tensor)
@@ -126,14 +127,35 @@ class RubiconLoss(nn.Module):
         loss_dice = self.dice(loc_logits, loc_targets)
         loc_loss = loss_bce + loss_dice
 
-        # 2. Damage loss: class-weighted CE + Focal
-        # Guard: if every pixel is ignored, CE would return NaN
-        if (dmg_targets != self.ignore_index).any():
-            loss_ce = self.ce(dmg_logits, dmg_targets)
-            loss_focal = self.focal(dmg_logits, dmg_targets)
+        # xBD target IDs are 1-4 for building damage and 0 for background.
+        # Background is owned by localization and ignored by the 4-way head.
+        building_mask = (dmg_targets >= 1) & (dmg_targets <= 4)
+        damage_targets = torch.where(
+            building_mask,
+            dmg_targets - 1,
+            torch.full_like(dmg_targets, self.ignore_index),
+        )
+        if dmg_logits.shape[1] == 5:
+            damage_logits = dmg_logits[:, 1:5]
+        elif dmg_logits.shape[1] == 4:
+            damage_logits = dmg_logits
         else:
-            loss_ce = dmg_logits.sum() * 0.0
-            loss_focal = dmg_logits.sum() * 0.0
+            raise ValueError(
+                f"Damage head must have 4 or legacy 5 channels, got {dmg_logits.shape[1]}"
+            )
+
+        if self.class_weights.numel() != 4:
+            raise ValueError(
+                f"Damage class weights must contain 4 values, got {self.class_weights.numel()}"
+            )
+
+        # Guard: if there are no building pixels, CE would return NaN.
+        if building_mask.any():
+            loss_ce = self.ce(damage_logits, damage_targets)
+            loss_focal = self.focal(damage_logits, damage_targets)
+        else:
+            loss_ce = damage_logits.sum() * 0.0
+            loss_focal = damage_logits.sum() * 0.0
         dmg_loss = loss_ce + loss_focal
 
         # 3. Weighted total loss
@@ -150,3 +172,26 @@ class RubiconLoss(nn.Module):
         }
 
         return total_loss, loss_breakdown
+
+
+def inverse_sqrt_class_weights(
+    class_pixel_counts: torch.Tensor | list[int],
+    max_weight: float = 10.0,
+) -> torch.Tensor:
+    """Return normalized inverse-square-root weights for four damage classes."""
+    counts = torch.as_tensor(class_pixel_counts, dtype=torch.float64)
+    if counts.shape != (4,):
+        raise ValueError(f"Expected four class pixel counts, got shape {tuple(counts.shape)}")
+    if not torch.isfinite(counts).all() or (counts < 0).any():
+        raise ValueError("Class pixel counts must be finite and non-negative")
+    if max_weight <= 0:
+        raise ValueError("max_weight must be positive")
+
+    present = counts > 0
+    if not present.any():
+        raise ValueError("Training data contains no labeled building damage pixels")
+
+    weights = torch.zeros_like(counts)
+    weights[present] = counts[present].rsqrt()
+    weights[present] /= weights[present].mean()
+    return weights.clamp(max=max_weight).to(dtype=torch.float32)

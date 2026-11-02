@@ -1,7 +1,7 @@
 """Hardware auto-detection and environment profiling for Rubicon training and inference.
 
 Detects GPU/VRAM/RAM/disk and configures:
-- Local 6 GB profile (RTX 3050): ResNet34, 512 crops, batch 2, accum 4, AMP fp16, channels_last
+- Local 6 GB profile (RTX 3050): ResNet34, 512 crops, batch 2, accum 2, AMP fp16, channels_last
 - Kaggle profile (>=15 GB VRAM): ResNet34, 512 crops, batch 8, accum 1
 - CPU profile (No GPU): ResNet18, 256 crops, batch 2, subset mode with warning
 """
@@ -85,7 +85,7 @@ def _apply_override(base: HardwareProfile, name: str) -> HardwareProfile:
             encoder="resnet34",
             crop_size=512,
             batch_size=2,
-            grad_accum_steps=4,
+            grad_accum_steps=2,
             use_amp=True,
             channels_last=True,
             num_workers=2 if os.name == "nt" else 4,
@@ -174,7 +174,7 @@ def _detect_profile() -> HardwareProfile:
         else:
             # Local 6 GB Profile (RTX 3050)
             print("  Selected Profile:  LOCAL 6GB VRAM (NVIDIA RTX 3050)")
-            print("  Configuration:     ResNet34 | 512x512 | Batch 2 | Accum 4 (eff 8) | AMP fp16 | OOM-Recovery")
+            print("  Configuration:     ResNet34 | 512x512 | Batch 2 | Accum 2 (eff 4) | AMP fp16 | OOM-Recovery")
             print("=" * 65)
             return HardwareProfile(
                 name="local_6gb",
@@ -182,7 +182,7 @@ def _detect_profile() -> HardwareProfile:
                 encoder="resnet34",
                 crop_size=512,
                 batch_size=2,
-                grad_accum_steps=4,  # effective batch = 8
+                grad_accum_steps=2,  # effective batch = 4
                 use_amp=True,
                 channels_last=True,
                 num_workers=2 if os.name == "nt" else 4,

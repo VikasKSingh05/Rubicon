@@ -20,29 +20,22 @@ import argparse
 import hashlib
 import json
 import math
-import os
-import sys
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
 
 import torch
-import torch.nn as nn
 import numpy as np
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from ai_engine.model.hardware import detect_hardware, HardwareProfile
+from ai_engine.model.hardware import detect_hardware
 from ai_engine.model.siamese_unet import SiameseUNet
-from ai_engine.model.losses import RubiconLoss
-from ai_engine.model.metrics import XView2Metrics
-from ai_engine.model.checkpoint import (
-    DAMAGE_CLASS_NAMES,
-    load_checkpoint,
-    save_checkpoint,
-)
+from ai_engine.model.losses import RubiconLoss, inverse_sqrt_class_weights
+from ai_engine.model.metrics import DAMAGE_CLASS_NAMES, XView2Metrics
+from ai_engine.model.metrics import decode_damage_logits
+from ai_engine.model.checkpoint import DAMAGE_SEVERITY_CLASS_NAMES, load_checkpoint, save_checkpoint
 from ai_engine.data.splits import load_or_create_splits, get_xbd_root
-from ai_engine.data.dataset import XBDDataset, get_weighted_sampler, compute_norm_stats
+from ai_engine.data.dataset import XBDDataset, compute_norm_stats
 from ai_engine.data.synthetic import generate_synthetic_dataset
 
 
@@ -93,6 +86,7 @@ def train():
     train_manifest = splits["train"]
     val_manifest = splits["val"]
     split_meta = splits.get("metadata", {})
+    full_val_tile_count = len(val_manifest)
 
     print(f"[INFO] Source split: {split_meta.get('source_split')} | "
           f"train events: {', '.join(split_meta.get('train_events', []))} | "
@@ -102,21 +96,32 @@ def train():
 
     # Handle subset argument
     if args.subset.lower() == "tiny":
-        train_manifest = train_manifest[:min(50, len(train_manifest))]
-        val_manifest = val_manifest[:min(20, len(val_manifest))]
-        print(f"[INFO] Running in TINY SMOKE TEST mode: {len(train_manifest)} train, {len(val_manifest)} val tiles.")
+        rng = np.random.default_rng(42)
+        n_sub = min(50, len(train_manifest))
+        indices = np.sort(rng.choice(len(train_manifest), size=n_sub, replace=False))
+        train_manifest = [train_manifest[int(i)] for i in indices]
+        print(
+            f"[INFO] TINY training subset: {len(train_manifest)} train / "
+            f"{len(val_manifest)} full event-disjoint validation tiles."
+        )
     else:
         subset_ratio = float(args.subset)
+        if not 0 < subset_ratio <= 1:
+            raise ValueError(f"--subset must be in (0, 1], got {subset_ratio}")
         if subset_ratio < 1.0:
-            n_sub = max(2, int(len(train_manifest) * subset_ratio))
-            train_manifest = train_manifest[:n_sub]
-            # Keep validation small too so smoke runs finish in minutes.
-            val_sub = max(1, int(len(val_manifest) * subset_ratio))
-            val_manifest = val_manifest[:val_sub]
-            print(f"[INFO] Reduced subset training ({subset_ratio*100:.0f}%): "
-                  f"{len(train_manifest)} train / {len(val_manifest)} val tiles.")
+            n_sub = max(1, int(len(train_manifest) * subset_ratio))
+            rng = np.random.default_rng(42)
+            indices = np.sort(rng.choice(len(train_manifest), size=n_sub, replace=False))
+            train_manifest = [train_manifest[int(i)] for i in indices]
+            print(
+                f"[INFO] Training subset {subset_ratio:.0%}: "
+                f"{len(train_manifest)} train / {len(val_manifest)} full "
+                "event-disjoint validation tiles (validation is not subset)."
+            )
 
     if args.max_val is not None:
+        if args.max_val < full_val_tile_count:
+            print("[WARN] --max-val explicitly caps validation; this is not a full validation result.")
         val_manifest = val_manifest[: max(0, args.max_val)]
         print(f"[INFO] Validation capped to {len(val_manifest)} tiles (--max-val).")
 
@@ -149,13 +154,20 @@ def train():
         norm_stats=(norm_mean, norm_std),
     )
 
-    weighted_sampler = get_weighted_sampler(train_dataset)
+    class_pixel_counts = train_dataset.damage_class_pixel_counts()
+    class_weights = inverse_sqrt_class_weights(class_pixel_counts)
+    print(
+        "[INFO] Training damage pixel counts "
+        f"({', '.join(DAMAGE_SEVERITY_CLASS_NAMES)}): {class_pixel_counts.tolist()}"
+    )
+    print(f"[INFO] Normalized inverse-sqrt class weights (capped at 10): {class_weights.tolist()}")
+    print("[INFO] Sampling: shuffled training tiles only; no weighted oversampling.")
 
     def build_train_loader() -> DataLoader:
         return DataLoader(
             train_dataset,
             batch_size=profile.batch_size,
-            sampler=weighted_sampler,
+            shuffle=True,
             num_workers=profile.num_workers,
             pin_memory=profile.pin_memory,
             drop_last=True if len(train_dataset) >= profile.batch_size else False,
@@ -172,13 +184,18 @@ def train():
 
     train_loader = build_train_loader()
     val_loader = build_val_loader()
+    batches_per_epoch = len(train_loader)
+    optimizer_steps_per_epoch = math.ceil(
+        batches_per_epoch / profile.grad_accum_steps
+    )
+    planned_total_optimizer_steps = optimizer_steps_per_epoch * args.epochs
 
     # 4. Initialize Model, Loss, Optimizer, Scheduler, Scaler
     print(f"\n[INFO] Initializing Siamese U-Net with shared '{profile.encoder}' encoder...")
     model = SiameseUNet(
         encoder_name=profile.encoder,
         encoder_weights=None if args.no_pretrained else "imagenet",
-        num_classes=5,
+        num_classes=4,
     ).to(device)
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
     trainable_parameter_count = sum(
@@ -188,7 +205,11 @@ def train():
     if profile.channels_last:
         model = model.to(memory_format=torch.channels_last)
 
-    criterion = RubiconLoss(loc_weight=0.4, dmg_weight=0.6).to(device)
+    criterion = RubiconLoss(
+        class_weights=class_weights,
+        loc_weight=0.4,
+        dmg_weight=0.6,
+    ).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
 
     # Cosine schedule with 1 epoch linear warmup
@@ -240,11 +261,20 @@ def train():
 
     epoch_durations = []
     history = []
+    collapse_warnings = []
     best_epoch = None
+    collapse_warning = None
+    stop_reason = None
+    total_optimizer_steps_completed = 0
 
     print("\n" + "=" * 65)
     print(f"STARTING TRAINING: {len(train_dataset)} Train Tiles | {len(val_dataset)} Val Tiles | {total_epochs} Epochs")
     print(f"Device: {device} | AMP: {profile.use_amp} | Effective Batch: {profile.batch_size * profile.grad_accum_steps}")
+    print(
+        f"Optimization steps: {optimizer_steps_per_epoch} per epoch "
+        f"({batches_per_epoch} batches / {profile.grad_accum_steps} accumulation) | "
+        f"{planned_total_optimizer_steps} planned total"
+    )
     print("=" * 65 + "\n")
 
     # 6. Training Loop
@@ -255,6 +285,7 @@ def train():
         running_loc_loss = 0.0
         running_dmg_loss = 0.0
         num_batches = 0
+        epoch_optimizer_steps = 0
 
         optimizer.zero_grad(set_to_none=True)
 
@@ -287,6 +318,8 @@ def train():
                         scaler.step(optimizer)
                         scaler.update()
                         optimizer.zero_grad(set_to_none=True)
+                        epoch_optimizer_steps += 1
+                        total_optimizer_steps_completed += 1
 
                     running_loss += breakdown["total_loss"]
                     running_loc_loss += breakdown["loc_loss"]
@@ -340,14 +373,14 @@ def train():
 
                 with torch.amp.autocast("cuda", enabled=(profile.use_amp and device.type == "cuda")):
                     loc_logits, dmg_logits = model(pre, post)
-                    v_loss, v_breakdown = criterion(loc_logits, dmg_logits, loc_mask, dmg_mask)
+                    _, v_breakdown = criterion(loc_logits, dmg_logits, loc_mask, dmg_mask)
 
                 val_running_loss += v_breakdown["total_loss"]
                 val_batches += 1
 
                 # Predictions
                 loc_probs = torch.sigmoid(loc_logits).cpu().numpy()
-                dmg_preds = torch.argmax(dmg_logits, dim=1).cpu().numpy()
+                dmg_preds = decode_damage_logits(dmg_logits).cpu().numpy()
 
                 val_metrics_meter.update(
                     loc_preds=loc_probs,
@@ -366,6 +399,7 @@ def train():
             "train_damage_loss": avg_dmg_loss,
             "validation_loss": avg_val_loss,
             "validation_metrics": metrics,
+            "optimizer_steps": epoch_optimizer_steps,
             "duration_sec": epoch_dur,
         })
 
@@ -380,8 +414,41 @@ def train():
             f"Val Loss: {avg_val_loss:.4f} | "
             f"Loc F1: {metrics['loc_f1']:.4f} | "
             f"Dmg Harmonic F1: {metrics['damage_f1_harmonic']:.4f} | "
+            f"Dmg Macro F1: {metrics['damage_f1_macro']:.4f} | "
             f"xView2 Score: {xview2_score:.4f} | "
+            f"Optimizer Steps: {epoch_optimizer_steps} | "
             f"Time: {epoch_dur:.1f}s (ETA: {est_remaining_sec}s)"
+        )
+        print("  Validation damage precision / recall / F1:")
+        for name in DAMAGE_CLASS_NAMES:
+            print(
+                f"    {name:<16}: "
+                f"P={metrics['damage_precision_classes'][name]:.4f} "
+                f"R={metrics['damage_recall_classes'][name]:.4f} "
+                f"F1={metrics['damage_f1_classes'][name]:.4f}"
+            )
+        histogram = metrics["predicted_building_class_histogram"]
+        histogram_pct = metrics["predicted_building_class_histogram_pct"]
+        predicted_building_pixels = metrics["predicted_building_pixels"]
+        histogram_summary = ", ".join(
+            f"{name}={count} ({histogram_pct[name]:.2f}%)"
+            for name, count in histogram.items()
+        )
+        print(
+            f"  Validation predicted-building class histogram "
+            f"({predicted_building_pixels} pixels): {histogram_summary}"
+        )
+        ground_truth_histogram = metrics["damage_ground_truth_class_histogram"]
+        ground_truth_histogram_pct = metrics["damage_ground_truth_class_histogram_pct"]
+        ground_truth_summary = ", ".join(
+            f"{name}={ground_truth_histogram[name]} "
+            f"({ground_truth_histogram_pct[name]:.2f}%)"
+            for name in DAMAGE_CLASS_NAMES
+        )
+        print(
+            f"  Validation ground-truth building class histogram "
+            f"({metrics['ground_truth_building_pixels']} pixels): "
+            f"{ground_truth_summary}"
         )
 
         # TensorBoard Logging
@@ -390,11 +457,27 @@ def train():
         writer.add_scalar("xView2/Score", xview2_score, epoch)
         writer.add_scalar("xView2/Loc_F1", metrics["loc_f1"], epoch)
         writer.add_scalar("xView2/Damage_F1_Harmonic", metrics["damage_f1_harmonic"], epoch)
+        writer.add_scalar("xView2/Damage_F1_Macro", metrics["damage_f1_macro"], epoch)
         for dmg_cls, val_f1 in metrics["damage_f1_classes"].items():
             writer.add_scalar(f"Damage_F1/{dmg_cls}", val_f1, epoch)
+            writer.add_scalar(
+                f"Damage_Precision/{dmg_cls}",
+                metrics["damage_precision_classes"][dmg_cls],
+                epoch,
+            )
+            writer.add_scalar(
+                f"Damage_Recall/{dmg_cls}",
+                metrics["damage_recall_classes"][dmg_cls],
+                epoch,
+            )
+            writer.add_scalar(
+                f"Damage_Ground_Truth_Pixels/{dmg_cls}",
+                ground_truth_histogram[dmg_cls],
+                epoch,
+            )
 
         # 8. Checkpoint Saving (Every Epoch: last and best)
-        model_version = f"siamese_unet_{profile.encoder}_v1"
+        model_version = f"siamese_unet_{profile.encoder}_damage4_v2"
         metrics_payload = dict(metrics)
         metrics_payload["xview2_score"] = xview2_score
 
@@ -404,11 +487,11 @@ def train():
                 model,
                 model_version=model_version,
                 encoder_name=profile.encoder,
-                num_classes=5,
+                num_classes=4,
                 crop_size=current_crop_size,
                 norm_mean=norm_mean,
                 norm_std=norm_std,
-                damage_classes=DAMAGE_CLASS_NAMES,
+                damage_classes=DAMAGE_SEVERITY_CLASS_NAMES,
                 epoch=epoch,
                 metrics=metrics_payload,
                 optimizer=optimizer if include_training_state else None,
@@ -430,6 +513,9 @@ def train():
                     "localization_loss_weight": 0.4,
                     "damage_loss_weight": 0.6,
                     "focal_gamma": 2.0,
+                    "damage_class_pixel_counts": class_pixel_counts.tolist(),
+                    "damage_class_weights": class_weights.cpu().tolist(),
+                    "damage_sampling": "shuffle_only_no_weighted_oversampling",
                     "batch_size": profile.batch_size,
                     "gradient_accumulation_steps": profile.grad_accum_steps,
                     "parameter_count": parameter_count,
@@ -455,9 +541,25 @@ def train():
             print(f"  [*] New best xView2 score achieved: {best_score:.4f}! Checkpoint saved.")
         else:
             patience_counter += 1
-            if patience_counter >= args.patience:
-                print(f"\n[INFO] Early stopping triggered after {args.patience} epochs without score improvement.")
-                break
+
+        if epoch + 1 >= 2 and predicted_building_pixels > 0:
+            dominant_class, dominant_count = max(histogram.items(), key=lambda item: item[1])
+            dominant_fraction = dominant_count / predicted_building_pixels
+            if dominant_fraction > 0.90:
+                collapse_warning = (
+                    f"epoch {epoch + 1}: {dominant_class} accounts for "
+                    f"{dominant_fraction:.1%} of predicted building pixels"
+                )
+                collapse_warnings.append(collapse_warning)
+                print(
+                    f"[WARN] Damage-class collapse detected: {collapse_warning}. "
+                    "Continuing training; this warning never stops the run."
+                )
+
+        if patience_counter >= args.patience:
+            stop_reason = "validation_score_patience"
+            print(f"\n[INFO] Early stopping triggered after {args.patience} epochs without score improvement.")
+            break
 
     writer.close()
 
@@ -466,16 +568,20 @@ def train():
         "data_mode": data_mode,
         "xbd_root": str(Path(xbd_root).resolve()),
         "source_split": split_meta.get("source_split"),
-        "model_version": f"siamese_unet_{profile.encoder}_v1",
+        "model_version": f"siamese_unet_{profile.encoder}_damage4_v2",
         "encoder": profile.encoder,
-        "num_classes": 5,
-        "class_names": DAMAGE_CLASS_NAMES,
+        "num_classes": 4,
+        "class_names": DAMAGE_SEVERITY_CLASS_NAMES,
         "hardware_profile": profile.name,
         "device": str(device),
         "crop_size": current_crop_size,
         "batch_size": profile.batch_size,
         "gradient_accumulation_steps": profile.grad_accum_steps,
         "effective_batch_size": profile.batch_size * profile.grad_accum_steps,
+        "batches_per_epoch": batches_per_epoch,
+        "optimizer_steps_per_epoch": optimizer_steps_per_epoch,
+        "planned_total_optimizer_steps": planned_total_optimizer_steps,
+        "total_optimizer_steps_completed": total_optimizer_steps_completed,
         "mixed_precision": bool(profile.use_amp and device.type == "cuda"),
         "optimizer": "AdamW",
         "learning_rate": args.lr,
@@ -485,6 +591,9 @@ def train():
         "localization_loss_weight": 0.4,
         "damage_loss_weight": 0.6,
         "focal_gamma": 2.0,
+        "damage_class_pixel_counts": class_pixel_counts.tolist(),
+        "damage_class_weights": class_weights.cpu().tolist(),
+        "damage_sampling": "shuffle_only_no_weighted_oversampling",
         "pretrained_encoder_weights": not args.no_pretrained,
         "parameter_count": parameter_count,
         "trainable_parameter_count": trainable_parameter_count,
@@ -492,6 +601,9 @@ def train():
         "epochs_completed": len(history),
         "best_epoch": best_epoch,
         "best_validation_xview2_score": best_score,
+        "collapse_warning": collapse_warning,
+        "collapse_warnings": collapse_warnings,
+        "stop_reason": stop_reason,
         "training_tiles": len(train_dataset),
         "validation_tiles": len(val_dataset),
         "training_events": split_meta.get("train_events", []),
@@ -504,6 +616,9 @@ def train():
             else None
         ),
         "duration_sec": round(time.perf_counter() - run_started, 2),
+        "optimizer_steps_per_epoch_history": [
+            item["optimizer_steps"] for item in history
+        ],
         "history": history,
     }
     summary_path = out_dir / "training_metrics.json"
@@ -514,6 +629,10 @@ def train():
     print("TRAINING RUN COMPLETE")
     print(f"  Best xView2 Score Achieved: {best_score:.4f}")
     print(f"  Trainable Parameters:       {trainable_parameter_count:,}")
+    print(
+        f"  Optimizer Steps:            {total_optimizer_steps_completed} completed / "
+        f"{planned_total_optimizer_steps} planned"
+    )
     print(f"  Training Summary:           {summary_path.resolve()}")
     if epoch_durations:
         avg_s = sum(epoch_durations) / len(epoch_durations)

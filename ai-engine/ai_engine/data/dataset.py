@@ -111,6 +111,14 @@ class XBDDataset(Dataset):
         """Adjust crop size at runtime to recover from CUDA OOM."""
         self.crop_size = new_size
 
+    def damage_class_pixel_counts(self) -> np.ndarray:
+        """Count labeled building pixels for classes 1-4 across these tiles."""
+        counts = np.zeros(4, dtype=np.int64)
+        for tile in self.tiles:
+            _, damage = self._get_masks(tile)
+            counts += np.bincount(damage.reshape(-1), minlength=5)[1:5]
+        return counts
+
     # ── internal helpers ─────────────────────────────────────────────
 
     def _get_masks(self, tile: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:

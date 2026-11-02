@@ -197,7 +197,7 @@ not an input to this Siamese U-Net.
 | **Inputs** | Paired pre/post RGB images (`.png`, `.jpg`, `.tif`, `.tiff`) and xBD JSON labels |
 | **Network input** | Three-channel pre and post tensors; crop size selected by hardware profile |
 | **Encoder** | Shared ResNet-18 (CPU profile) or ResNet-34 (GPU profiles) |
-| **Outputs** | Binary building-localization mask and five-way per-pixel damage logits |
+| **Outputs** | Binary building-localization mask and four-way damage logits trained on building pixels |
 | **Damage channels** | `0: background`, `1: no-damage`, `2: minor-damage`, `3: major-damage`, `4: destroyed` |
 | **Training entry point** | `python train.py --xbd-root <path>` from `ai-engine/` |
 | **Evaluation entry point** | `python eval.py --xbd-root <path> --split val` from `ai-engine/` |
@@ -245,7 +245,7 @@ Rubicon implements the dual-task Siamese U-Net change-detection architecture ill
                                       ▼                               ▼
                       ┌───────────────────────────────┐ ┌───────────────────────────────┐
                       │   Building Localization Head  │ │  Damage Classification Head   │
-                      │   (1 Channel, Sigmoid)        │ │  (5 Classes, Softmax)         │
+                      │   (1 Channel, Sigmoid)        │ │  (4 Damage Classes, Softmax) │
                       └───────────────────────────────┘ └───────────────────────────────┘
                                       │                               │
                                       ▼                               ▼
@@ -262,8 +262,8 @@ Rubicon implements the dual-task Siamese U-Net change-detection architecture ill
    - Loss function:
      $$\mathcal{L}_{\text{loc}} = \mathcal{L}_{\text{BCE}} + \mathcal{L}_{\text{Dice}}$$
 2. **Damage Classification Head**:
-   - 5-channel output (Background, No Damage, Minor Damage, Major Damage, Destroyed) with Softmax activation.
-   - Loss function combines class-weighted Cross-Entropy with Focal Loss ($\gamma = 2.0$) to counter severe class imbalance in xBD:
+   - Four-way output (No Damage, Minor Damage, Major Damage, Destroyed); background pixels are excluded from damage loss and handled by localization.
+   - Loss function combines training-frequency inverse-square-root weighted Cross-Entropy with Focal Loss ($\gamma = 2.0$):
      $$\mathcal{L}_{\text{dmg}} = \mathcal{L}_{\text{CE, weighted}} + \mathcal{L}_{\text{Focal}}$$
 3. **Joint Multi-Task Objective**:
    $$\mathcal{L}_{\text{total}} = 0.4 \times \mathcal{L}_{\text{loc}} + 0.6 \times \mathcal{L}_{\text{dmg}}$$
@@ -271,6 +271,7 @@ Rubicon implements the dual-task Siamese U-Net change-detection architecture ill
 #### Training Pipeline (`train.py` & `ai_engine/model/`):
 - **Hardware Auto-Detection**: Dynamic profiles for Local RTX 3050 (6GB VRAM, crop size 512 with automatic fallback to 384/256 on CUDA OOM), Kaggle GPU (16GB+ VRAM), and CPU fallback.
 - **Optimization**: AdamW (default learning rate $3 \times 10^{-4}$, weight decay $10^{-4}$), one-epoch warmup followed by cosine scheduling, localization/damage loss weights 0.4/0.6, focal gamma 2.0, and gradient clipping (max norm 1.0). AMP is enabled on supported CUDA profiles.
+- **Damage imbalance**: Class weights are computed from selected training-pixel frequencies, normalized and capped at 10. Training shuffles tiles without weighted oversampling. Validation histograms use predicted building pixels and stop the run with a warning if one class exceeds 90% after epoch 2.
 - **Validation Metric**: Comprehensive xView2 evaluation metric ($F_1^{\text{loc}}$ and harmonic mean $F_1^{\text{dmg}}$ across damage classes).
 - **Reproducibility report**: `training_metrics.json` records actual data mode, tiles/events, hardware, parameter count, hyperparameters, epoch history, best epoch, and checkpoint hash. The evaluator writes separate results for `val`, `hold`, and `test`.
 
@@ -473,7 +474,7 @@ If no external LLM API key (Anthropic/OpenAI/OpenRouter) is configured, Rubicon 
 **Answer:** In `ai_engine/model/losses.py`, we optimize a joint multi-task objective:
 $$\mathcal{L}_{\text{total}} = 0.4 \times \mathcal{L}_{\text{loc}} + 0.6 \times \mathcal{L}_{\text{dmg}}$$
 - **Localization Head** uses BCE + Dice Loss ($\mathcal{L}_{\text{loc}} = \mathcal{L}_{\text{BCE}} + \mathcal{L}_{\text{Dice}}$) to handle binary building footprint delineation.
-- **Damage Classification Head** uses Class-Weighted Cross-Entropy + Focal Loss ($\gamma = 2.0$) ($\mathcal{L}_{\text{dmg}} = \mathcal{L}_{\text{CE, weighted}} + \mathcal{L}_{\text{Focal}}$) to counter the extreme class imbalance in xBD where ~70% of buildings have no damage.
+- **Damage Classification Head** uses four-way Class-Weighted Cross-Entropy + Focal Loss ($\gamma = 2.0$) on ground-truth building pixels only; inverse-square-root weights come from the selected training-pixel frequencies.
 
 #### Q8: What dataset is used, and what are the target damage classes?
 **Answer:** Rubicon is trained on the benchmark **xBD (xView2)** dataset developed by DIUx and Maxar. It covers over 45,000 km² across multiple global disaster events (earthquakes, tsunamis, wildfires, hurricanes, and volcanic eruptions). The 4 standardized damage assessment classes are:

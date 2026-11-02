@@ -40,7 +40,7 @@ Environment auto-detection executed on the local deployment machine:
 ### Hardware Profile Configuration Strategy
 1. **Local Profile (6 GB RTX 3050):**
    - ResNet34 encoder (fallback to ResNet18 upon memory pressure)
-   - $512 \times 512$ tile crops, batch size 2, gradient accumulation 4 (effective batch size 8)
+   - $512 \times 512$ tile crops, batch size 2, gradient accumulation 2 (effective batch size 4)
    - Automatic Mixed Precision (`torch.cuda.amp.autocast(fp16)`) and `channels_last` memory layout
    - Automatic OOM recovery: catches `torch.cuda.OutOfMemoryError`, clears CUDA cache, dynamically reduces crop size to $384 \times 384$ then $256 \times 256$, logs warnings, and resumes training.
    - Safe DataLoader defaults: `num_workers=2` on Windows to avoid spawn/fork bottlenecks.
